@@ -1,0 +1,4 @@
+interface:
+  display_name: "KBDS Data Organizer"
+  short_description: "Plan and verify copy-only research data staging"
+  default_prompt: "Use $kbds-data-organizer to inspect the approved dataset, ask about unresolved relationships, and present a copy-only plan for human approval."
