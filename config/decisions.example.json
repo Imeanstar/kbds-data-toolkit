@@ -1,0 +1,32 @@
+{
+  "files": {
+    "batch_A/specimen01_R1.fastq.gz": {
+      "action": "include",
+      "reason": "Synthetic example only; replace with a confirmed decision",
+      "evidence": "Synthetic user confirmation, not real research evidence",
+      "repository": "KRA",
+      "study": "ExampleStudy",
+      "sample": "Specimen01_Blood",
+      "experiment": "Library01_WES",
+      "run": "LocalRun01",
+      "layout": "PAIRED",
+      "raw_confirmed": true
+    },
+    "batch_A/specimen01_R2.fastq.gz": {
+      "action": "include",
+      "reason": "Synthetic example only; replace with a confirmed decision",
+      "evidence": "Synthetic user confirmation, not real research evidence",
+      "repository": "KRA",
+      "study": "ExampleStudy",
+      "sample": "Specimen01_Blood",
+      "experiment": "Library01_WES",
+      "run": "LocalRun01",
+      "layout": "PAIRED",
+      "raw_confirmed": true
+    },
+    "analysis/temporary.txt": {
+      "action": "exclude",
+      "reason": "Explicit synthetic exclusion; preserve source unchanged"
+    }
+  }
+}

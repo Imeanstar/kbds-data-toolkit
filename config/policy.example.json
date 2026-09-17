@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "mode": "practice",
+  "source_root": "/srv/kbds-practice/raw/ExampleStudy",
+  "destination_root": "/srv/kbds-practice/raw/KBDS_ExampleStudy",
+  "workspace_root": "/srv/kbds-practice/work/job-001",
+  "allow_practice_zero_bytes": true,
+  "reserve_bytes": 104857600
+}
