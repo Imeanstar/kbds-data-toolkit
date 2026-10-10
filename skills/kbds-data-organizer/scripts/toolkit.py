@@ -496,10 +496,31 @@ def completion_record(plan):
                           "sha256_and_four_line_fastq" if has_fastq else "sha256_only"}
 
 
+def inventory_summary(records):
+    """Bounded filename candidates, never confirmed classifications or decisions."""
+    groups = {}
+    for row in records:
+        key = (row["kind"], row["repository_candidate"])
+        group = groups.setdefault(key, {"kind": key[0], "repository_candidate": key[1],
+                                       "files": 0, "zero_byte_files": 0,
+                                       "examples": [], "examples_truncated": False})
+        group["files"] += 1
+        group["zero_byte_files"] += row["size"] == 0
+        if len(group["examples"]) < 2:
+            path = row["source_relative"]
+            group["examples"].append(path[:200])
+            group["examples_truncated"] |= len(path) > 200
+    empty = sum(row["size"] == 0 for row in records)
+    return {"files": len(records), "bytes": sum(row["size"] for row in records),
+            "zero_byte_files": empty, "nonzero_byte_files": len(records) - empty,
+            "classification_candidates": [groups[key] for key in sorted(groups)]}
+
+
 def plan_summary(plan):
     return {"status": plan["status"], "plan_sha256": plan["plan_sha256"],
             **{key: plan["policy"][key] for key in ("mode", "source_root", "destination_root", "workspace_root")},
             "inventory_files": len(plan["inventory"]), "included_files": len(plan["files"]),
+            "inventory_summary": inventory_summary(plan["inventory"]),
             "excluded_files": len(plan["excluded"]), "unresolved_items": len(plan["unresolved"]),
             "error_count": len(plan["errors"]), "bytes": sum(row["size"] for row in plan["files"]),
             "errors_preview": [error[:512] for error in plan["errors"][:10]],
@@ -694,7 +715,7 @@ def main(argv=None):
             result = {"files": records, "errors": errors}
             if args.summary:
                 result = {"mode": policy["mode"], "source_root": policy["source_root"],
-                          "files": len(records), "bytes": sum(row["size"] for row in records),
+                          **inventory_summary(records),
                           "error_count": len(errors), "errors_preview": [error[:512] for error in errors[:10]]}
             print(json.dumps(result, indent=2))
             return 2 if errors else 0

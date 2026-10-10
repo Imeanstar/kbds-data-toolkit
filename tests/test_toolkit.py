@@ -27,6 +27,26 @@ t = module("toolkit", ROOT / "skills/kbds-data-organizer/scripts/toolkit.py")
 remote = module("remote", ROOT / "scripts/remote_stage.py")
 
 
+class InventorySummaryTests(unittest.TestCase):
+    def test_large_inventory_keeps_counts_and_late_categories_without_full_list(self):
+        records = [{"source_relative": f"synthetic/read_{i}_R1.fastq.gz", "size": 0,
+                    "kind": "raw_fastq_candidate", "repository_candidate": "KRA"}
+                   for i in range(3000)]
+        records.append({"source_relative": "metadata/" + "x" * 300, "size": 7,
+                        "kind": "metadata_candidate", "repository_candidate": "review"})
+        result = t.inventory_summary(records)
+        self.assertEqual((result["files"], result["bytes"], result["zero_byte_files"],
+                          result["nonzero_byte_files"]), (3001, 7, 3000, 1))
+        groups = {row["kind"]: row for row in result["classification_candidates"]}
+        self.assertEqual(groups["raw_fastq_candidate"]["files"], 3000)
+        self.assertEqual(len(groups["raw_fastq_candidate"]["examples"]), 2)
+        self.assertEqual(groups["metadata_candidate"]["files"], 1)
+        self.assertTrue(groups["metadata_candidate"]["examples_truncated"])
+        self.assertLess(len(json.dumps(result)), 1500)
+        self.assertNotIn("action", json.dumps(result))
+        self.assertEqual(t.inventory_summary([])["classification_candidates"], [])
+
+
 @unittest.skipUnless(t.FILESYSTEM_SUPPORTED, "Linux no-follow filesystem integration required")
 class ToolkitTests(unittest.TestCase):
     def setUp(self):

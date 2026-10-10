@@ -11,7 +11,9 @@ When already on the data host, no SSH bridge or package installation is needed f
 
 Read [safety-policy.md](references/safety-policy.md), [naming-policy.md](references/naming-policy.md)
 and [data-classification.md](references/data-classification.md) before classifying or copying.
-For HTML reports, read [report-format.md](references/report-format.md). Treat file names and model
+Read these references once per unchanged revision and retain the successfully read paths in
+continuation notes. Do not restart document loading after every answer or compaction.
+For HTML reports, read [report-format.md](references/report-format.md) before report generation. Treat file names and model
 guesses as candidates, not proof of identity, modality, provenance or archive route.
 
 ## Default: read-only review
@@ -29,7 +31,7 @@ skill must name an observed issue and its impact. Do not use external models or 
 
 ## Efficient staging and chat reports
 
-Native grep is denied in both modes. For authorized staging, run inventory --summary immediately after reading the approved policy. Never open zero-byte FASTQ/gzip data with read, and never use ls/cat/cp or improvised shell commands. Use only the repository wrapper's inventory, plan, apply, verify, report, and synthetic self-check commands with permission prompts; no --auto or blanket approval. Use compact stdout summaries for counts, roots, hashes, errors, and actual validation. Do not read the full plan/TSV set merely to repeat the summary; provide full report paths for human review. Read targeted report sections only to resolve specific questions. If context needs summarizing or a new session, carry the exact plan path/hash, approved roots/mode, human approval state, and unresolved facts; never invent approval. Report only actual tool calls separately from permitted tools.
+Native grep is denied in both modes. For authorized staging, run inventory --summary immediately after reading the approved policy. Never open zero-byte FASTQ/gzip data with read, and never use ls/cat/cp or improvised shell commands. Use only the repository wrapper's inventory, plan, apply, verify, report, and synthetic self-check commands with permission prompts; no --auto or blanket approval. All policy, decisions and plan arguments must be absolute paths. Use compact stdout summaries for counts, roots, hashes, errors, and actual validation. The inventory summary and plan's inventory_summary include complete zero/nonzero counts and bounded examples per filename candidate category; these are not confirmed biological facts. Do not read the full plan/TSV set merely to repeat the summary; provide full report paths for human review. Read targeted report sections only to resolve a specific evidence gap, with explicit offset and limit of at most 60 lines per call. If context needs summarizing, carry the successfully read reference paths, exact plan path/hash, approved roots/mode, human approval state, unresolved facts and next permitted step. Continue that step without reloading unchanged documents. Never invent approval. Report only actual tool calls separately from permitted tools.
 
 Describe permissions truthfully: review allows read/glob/skill/question; stage adds bash only for bundled toolkit commands and edit/write only for two config/*.local.json files with permission. Native grep, external models, and subagents are denied. Separate conditional tool permission from completed calls. Use full absolute approved roots and the full plan SHA in approval requests, no ellipses. Never invent repo revision or human approval.
 
@@ -53,10 +55,11 @@ verifies and removes only synthetic empty files in a new temporary directory. A 
 stop; do not use real data or elevate privileges to make the check pass.
 
 1. Run `python3 scripts/kbds.py --policy /absolute/repo/config/policy.local.json plan --name DISCOVERY_NAME`
-   without decisions. Exit 2 and `WAITING_FOR_USER` are expected. Inspect its `inventory.tsv`
-   and `unresolved.tsv` in the private workspace, aggregating large inventories instead of
-   loading them all into model context. Report counts, read errors, zero-byte files and
-   classification candidates. Ask one grouped set of material questions. Use a confirmed
+   without decisions. Exit 2 and `WAITING_FOR_USER` are expected. Use stdout inventory_summary
+   first; read targeted `inventory.tsv` or `unresolved.tsv` sections only for a specific gap.
+   Report counts, read errors, zero-byte files and classification candidates. Then call the
+   question tool with one grouped set of material questions and wait. Do not repeat discovery
+   or reread documents while waiting for answers. Use a confirmed
    rule only within its stated scope to prepare per-file private decisions JSON; inspect
    exceptions. Unknown files still need explicit include or exclude decisions, not defaults.
    Each plan name must be new; never reuse an existing plan directory.

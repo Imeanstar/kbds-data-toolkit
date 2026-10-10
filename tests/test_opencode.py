@@ -29,8 +29,12 @@ class OpenCodeProfileTest(unittest.TestCase):
         self.assertEqual(config["subagent_depth"], 0)
         self.assertEqual(config["provider"]["qwen-local"]["options"]["baseURL"],
                          "http://127.0.0.1:8080/v1")
-        self.assertEqual(config["compaction"], {"auto": True, "prune": True, "reserved": 4096})
+        self.assertEqual(config["compaction"], {"auto": True, "prune": True, "reserved": 4096,
+                                              "tail_turns": 1, "preserve_recent_tokens": 2048})
         model = config["provider"]["qwen-local"]["models"]["qwen3.8-27b"]
+        self.assertEqual(model["limit"], {"context": 16384, "input": 16384, "output": 2048})
+        self.assertGreaterEqual(config["compaction"]["reserved"], model["limit"]["output"])
+        self.assertEqual(config["agent"]["compaction"]["model"], config["model"])
         self.assertEqual(model["options"]["chat_template_kwargs"],
                          {"enable_thinking": False, "preserve_thinking": False})
 
