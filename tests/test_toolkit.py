@@ -7,7 +7,9 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
+import threading
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -300,6 +302,20 @@ class ToolkitTests(unittest.TestCase):
         self.assertFalse(closing)
         self.assertEqual(json.loads(response.read_text())["stdout"], "safe")
         self.assertIn(b"printf safe", session.stdin.getvalue())
+
+    def test_password_bridge_preserves_exact_stdout_in_a_real_shell(self):
+        session = subprocess.Popen(["sh"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0)
+        timeout = threading.Timer(5, session.kill)
+        timeout.start()
+        try:
+            for index, (command, expected) in enumerate(
+                    [("printf safe", "safe"), ("printf 'safe\\n'", "safe\n"), ("true", "")]):
+                self.assertEqual(remote.run_session_command(session, command, "a" * 64, f"{index:032x}"),
+                                 (0, expected))
+        finally:
+            timeout.cancel()
+            session.terminate()
+            session.communicate(timeout=5)
 
     def test_sensitive_directory_is_not_scanned(self):
         (self.src / ".ssh").mkdir()

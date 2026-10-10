@@ -192,7 +192,7 @@ def run_session_command(session, command, token, request_id):
     script = (f"printf '%s\\n' {shlex.quote(begin)}\n"
               f"(\n{command}\n) 2>&1\n"
               "kbds_status=$?\n"
-              f"printf '%s:%s\\n' {shlex.quote(end)} \"$kbds_status\"\n")
+              f"printf '\\n%s:%s\\n' {shlex.quote(end)} \"$kbds_status\"\n")
     session.stdin.write(script.encode("utf-8"))
     session.stdin.flush()
     output = []
@@ -210,7 +210,11 @@ def run_session_command(session, command, token, request_id):
             status = text[len(end) + 1:]
             if not status.isdigit():
                 raise RuntimeError("SSH session returned an invalid status marker")
-            return int(status), "".join(output)
+            # Remove only the framing newline; preserve the command's exact stdout.
+            framed_output = "".join(output)
+            if not framed_output.endswith("\n"):
+                raise RuntimeError("SSH session returned an invalid output separator")
+            return int(status), framed_output[:-1]
         if started:
             output.append(line)
 
