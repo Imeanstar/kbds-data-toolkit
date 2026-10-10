@@ -57,10 +57,14 @@ The following policy, planning and copy commands are for explicitly requested st
 Launch the stage agent from the repository root:
 
 ```bash
-opencode --agent kbds-stage
+opencode --agent kbds-stage --model qwen-local/qwen3.8-27b
 ```
 
 Use the Tab key to switch between primary agents within a session. Restart OpenCode after any configuration changes. Ensure `config/policy.local.json` and `config/decisions.local.json` are updated only with explicit permission prompts. Human approval of the exact plan SHA is mandatory before applying changes.
+
+The launch command pins the local model. Keep the repository configuration loaded. After
+changing runtime overrides, check `opencode debug agent kbds-stage` and `opencode debug config`
+for the local model and permission rules before opening a dataset.
 
 ## Configure locally for staging, never in public Git
 
