@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -312,6 +313,113 @@ class ToolkitTests(unittest.TestCase):
     def test_missing_raw_confirmation_stops(self):
         self.decisions["files"]["example_R1.fastq.gz"].pop("raw_confirmed")
         self.assertEqual(self.plan()["status"], "WAITING_FOR_USER")
+
+    def test_report_contents_must_match_approved_plan(self):
+        plan = self.plan()
+        t.apply(self.policy, plan, plan["plan_sha256"])
+        for name in t.report_bytes(plan):
+            with self.subTest(report=name):
+                path = self.dest / "metadata" / name
+                original = path.read_bytes()
+                path.write_bytes(b"corrupted synthetic report\n")
+                with self.assertRaises(t.Blocked):
+                    t.verify(self.policy, plan)
+                path.write_bytes(original)
+
+    def test_all_completion_fields_are_validated(self):
+        plan = self.plan()
+        t.apply(self.policy, plan, plan["plan_sha256"])
+        path = self.dest / "metadata/COMPLETE.json"
+        original = json.loads(path.read_text())
+        for key, value in {"mode": "production", "files": 999, "submission_ready": True,
+                           "validation": "invented", "plan_sha256": "0" * 64}.items():
+            with self.subTest(field=key):
+                path.write_text(json.dumps({**original, key: value}))
+                with self.assertRaises(t.Blocked):
+                    t.verify(self.policy, plan)
+        path.write_text(json.dumps(original))
+        t.verify(self.policy, plan)
+
+    def test_copy_event_sequence_is_validated(self):
+        plan = self.plan()
+        t.apply(self.policy, plan, plan["plan_sha256"])
+        path = self.dest / "metadata/events.jsonl"
+        original = path.read_bytes()
+        first = json.loads(original.splitlines()[0])
+        for data in (json.dumps({**first, "index": True}).encode() + b"\n" + original.splitlines(keepends=True)[1],
+                     original.splitlines(keepends=True)[0], original + b"{}\n"):
+            with self.subTest(data=data):
+                path.write_bytes(data)
+                with self.assertRaises(t.Blocked):
+                    t.verify(self.policy, plan)
+        path.write_bytes(original)
+        t.verify(self.policy, plan)
+
+    def test_non_kra_production_reports_checksum_only(self):
+        self.policy.update(mode="production", allow_practice_zero_bytes=False)
+        self.decisions = {"files": {name: {"action": "exclude", "reason": "Synthetic exclusion"}
+                                    for name in self.decisions["files"]}}
+        (self.src / "notes.txt").write_text("Synthetic non-FASTQ data")
+        self.decisions["files"]["notes.txt"] = {"action": "include", "reason": "Synthetic inclusion",
+            "evidence": "Synthetic user confirmation", "repository": "review", "study": "ExampleStudy"}
+        plan = self.plan()
+        t.apply(self.policy, plan, plan["plan_sha256"])
+        t.verify(self.policy, plan)
+        marker = json.loads((self.dest / "metadata/COMPLETE.json").read_text())
+        self.assertEqual(marker["validation"], "sha256_only")
+
+    def test_aws_directory_is_blocked_before_opening(self):
+        self.policy.update(mode="production", allow_practice_zero_bytes=False)
+        (self.src / ".aws").mkdir()
+        (self.src / ".aws/config").write_text("SYNTHETIC_SENTINEL_ONLY")
+        original = t.regular
+
+        def guarded(fd, relative, **kwargs):
+            self.assertNotIn(".aws", relative.split("/"))
+            return original(fd, relative, **kwargs)
+
+        with mock.patch.object(t, "regular", side_effect=guarded):
+            records, errors = t.inventory(self.policy)
+        self.assertEqual(len(records), 2)
+        self.assertTrue(any(".aws" in error for error in errors))
+
+    def test_cli_inventory_and_plan_summaries(self):
+        policy = self.base / "policy.json"
+        policy.write_text(json.dumps(self.policy))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(t.main(["--policy", str(policy), "inventory", "--summary"]), 0)
+        summary = json.loads(out.getvalue())
+        self.assertEqual((summary["files"], summary["bytes"], summary["error_count"]), (2, 0, 0))
+        self.assertFalse(self.dest.exists())
+        self.assertFalse(Path(self.policy["workspace_root"]).exists())
+        decisions = self.base / "decisions.json"
+        decisions.write_text(json.dumps(self.decisions))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(t.main(["--policy", str(policy), "plan", "--name", "summary",
+                                    "--decisions", str(decisions)]), 0)
+        summary = json.loads(out.getvalue())
+        self.assertEqual(summary["included_files"], 2)
+        self.assertEqual(summary["excluded_files"], 0)
+        self.assertEqual(summary["unresolved_items"], 0)
+        self.assertFalse(self.dest.exists())
+
+    def test_cli_verify_does_not_claim_to_repeat_fastq_checks(self):
+        self.production()
+        policy = self.base / "policy.json"
+        policy.write_text(json.dumps(self.policy))
+        plan = self.plan()
+        t.apply(self.policy, plan, plan["plan_sha256"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(t.main(["--policy", str(policy), "verify", "--plan",
+                                    str(Path(self.policy["workspace_root"]) / "plan-1/plan.json")]), 0)
+        summary = json.loads(out.getvalue())
+        self.assertEqual(summary["package_validation"], "sha256_and_four_line_fastq")
+        self.assertEqual(summary["validation"], "sha256_only")
+        self.assertEqual(summary["fastq_files_checked"], 0)
+        self.assertTrue(summary["metadata_verified"])
 
 
 if __name__ == "__main__":

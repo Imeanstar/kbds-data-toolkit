@@ -14,6 +14,8 @@ List only tools invoked in the 'Actually Called' section. Do not include unused 
 or vague labels. Ensure clarity by distinguishing available capabilities from executed actions
 to prevent ambiguity in audit trails.
 
+Describe permissions truthfully: review allows read/glob/skill/question; stage adds bash only for bundled toolkit commands and edit/write only for two config/*.local.json files with permission. Native grep, external models, and subagents are denied. Separate conditional tool permission from completed calls. Use full absolute approved roots and the full plan SHA in approval requests, no ellipses. Never invent repo revision or human approval.
+
 ## Prerequisites
 
 Read `references/safety-policy.md`, `references/naming-policy.md` and
@@ -35,9 +37,13 @@ path or add another volume. Use only the explicitly selected mode, not a folder-
 
 Treat SKILL.md and AGENTS.md as strict operational instructions, not sandbox boundaries. Prohibit shell chains, redirections, and direct source/script edits. Only execute `python3 scripts/kbds.py --policy ...` from the repository root. Config changes to `policy.local.json` and `decisions.local.json` require explicit permission prompts. Never use `--auto` or blanket approvals. Source data is immutable; only write to new destinations. Preserve partial failures. If symlinks exist, request approved canonical roots. No external models or subagents. Selecting a stage is not plan approval; exact human plan-SHA approval is mandatory before applying changes. Verify results and provide a truthful chat report.
 
+## Efficient staging and chat reports
+
+Native grep is denied in both modes. For authorized staging, run inventory --summary immediately after reading the approved policy. Never open zero-byte FASTQ/gzip data with read, and never use ls/cat/cp or improvised shell commands. Use only the repository wrapper's inventory, plan, apply, and verify commands with permission prompts; no --auto or blanket approval. Use compact stdout summaries for counts, roots, hashes, errors, and actual validation. Do not read the full plan/TSV set merely to repeat the summary; provide full report paths for human review. Read targeted report sections only to resolve specific questions. If context needs summarizing or a new session, carry the exact plan path/hash, approved roots/mode, human approval state, and unresolved facts; never invent approval. Report only actual tool calls separately from permitted tools.
+
 ## Staging workflow (opt-in)
 
-1. Inspect the scoped source with `inventory`. Report actual counts and errors. Unreadable
+1. Inspect the scoped source with `inventory --summary`. Report actual counts and errors. Unreadable
    paths, symlinks, nonregular files and sensitive names block completeness. Do not hide errors.
 2. Parse paths into candidates only. Preserve original names. Never merge differently spelled
    identifiers or equate a subject with a BioSample. Do not import facts from another study.
@@ -66,7 +72,7 @@ Treat SKILL.md and AGENTS.md as strict operational instructions, not sandbox bou
 These paths are syntax examples, not authorization. Control file paths must be absolute.
 
 ```bash
-python3 scripts/toolkit.py --policy /approved/policy.local.json inventory
+python3 scripts/toolkit.py --policy /approved/policy.local.json inventory --summary
 python3 scripts/toolkit.py --policy /approved/policy.local.json plan --name draft-001
 python3 scripts/toolkit.py --policy /approved/policy.local.json plan --name reviewed-001 --decisions /approved/decisions.local.json
 python3 scripts/toolkit.py --policy /approved/policy.local.json apply --plan /approved/work/reviewed-001/plan.json --approve-plan FULL_SHA256

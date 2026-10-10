@@ -26,45 +26,112 @@ Example request:
 References: https://developers.openai.com/codex/skills and
 https://developers.openai.com/codex/guides/agents-md (checked 2026-09-17).
 
-## OpenCode with local Qwen
+## kbds-data-organizer with local Qwen and OpenCode
 
-The new default workflow: install OpenCode, clone the repository, start the existing local llama-server, run OpenCode from the repository root, and ask it to load kbds-data-organizer. The bundled opencode.json defaults to kbds-review, local qwen3.8-27b at localhost:8080/v1, no external provider fallback, and no data writes or bash. Users provide the input path in chat. Configuration permissions can be changed by the account owner; do not call this immutable OS enforcement. Staging is an explicit later operation. Original metadata may reference a different machine, so never automatically replay old plans. No run-specific temporary state belongs in permanent instructions.
+Run OpenCode on the same Linux server as the model and dataset. Use Python 3.10+,
+Git and curl. OpenCode 1.18.35 and llama.cpp b11429 were used for validation.
+The toolkit uses Python's standard library. It does not require a paid API key.
 
-With OpenCode installed and the local Qwen server running:
+### 1. Install OpenCode and get this branch
 
-Use a server context size of at least 16384 tokens, matching opencode.json. An 8192-token
-server can reject the request after the skill and its references have been loaded.
+Install [OpenCode](https://opencode.ai/docs/) from its official installer. These
+are operator setup commands; the KBDS agents cannot install software.
 
 ```bash
-git clone https://github.com/Imeanstar/kbds-data-toolkit.git
+task_installer=$(mktemp)
+curl -fsSL https://opencode.ai/install -o "$task_installer"
+bash "$task_installer" --version 1.18.35
+export PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"
+opencode --version
+
+mkdir -p "$HOME/kbds-tools"
+cd "$HOME/kbds-tools"
+git clone --branch codex/opencode-read-only-qwen-20261010 --single-branch \
+  https://github.com/Imeanstar/kbds-data-toolkit.git
 cd kbds-data-toolkit
-opencode
 ```
 
-Example request:
+Use this branch until its changes are merged into main. A plain clone currently
+gets main without this Qwen profile. Start OpenCode from the repository root.
 
-> Load kbds-data-organizer. Inspect only the file list and existing organization records
-> in the directory I provide. Do not create, modify, move, delete or organize files.
-> Explain the evidence and limitations in chat.
+### 2. Start your local Qwen API
 
-Approve access only to the selected directory when OpenCode asks. Bash and edit tools
-remain denied. OpenCode stores its own sessions outside the dataset; chat-only means no
-new dataset or report files, not that the application has no internal state.
-The following policy, planning and copy commands are for explicitly requested staging only.
+If Qwen is already running, check the API in step 3. Otherwise install
+[llama.cpp](https://github.com/ggml-org/llama.cpp/blob/b11429/docs/build.md)
+using a CPU or CUDA build suitable for your server. Set `LLAMA_SERVER` below to
+your installed executable. This example uses the official
+[Qwen3.8-27B GGUF](https://huggingface.co/ggml-org/Qwen3.8-27B-GGUF).
 
-## OpenCode staging mode
+```bash
+mkdir -p "$HOME/models/Qwen3.8-27B"
+cd "$HOME/models/Qwen3.8-27B"
+curl -fL --output Qwen3.8-27B-Q4_K_M.gguf \
+  https://huggingface.co/ggml-org/Qwen3.8-27B-GGUF/resolve/71bc7b627595dc8a91039addd9c791ae548d6747/Qwen3.8-27B-Q4_K_M.gguf
+printf '%s  %s\n' \
+  c600de0300ae8a0eb3a6c0b8b5561b8b96f16bd2c863c2a66c42de29d391a747 \
+  Qwen3.8-27B-Q4_K_M.gguf | sha256sum -c -
+LLAMA_SERVER=/absolute/path/to/llama-server
+"$LLAMA_SERVER" -m "$PWD/Qwen3.8-27B-Q4_K_M.gguf" \
+  --alias qwen3.8-27b --host 127.0.0.1 --port 8080 \
+  --jinja --fit off -c 16384 -np 1 -ngl 24
+```
 
-Launch the stage agent from the repository root:
+Keep that terminal running. Use a second SSH terminal for OpenCode. Ctrl+C in
+that model terminal stops the server and releases its model allocation.
+The example splits weights between GPU and RAM. Fewer GPU layers (`-ngl`) use
+more RAM; `-ngl 0` permits CPU-only use. Choose the value for your GPU.
+The tested hardware has 64 GB RAM and 11 GB VRAM; this is a working example,
+not a guarantee for every server. The model file is about 19 GB.
+No vision projector is needed for this toolkit's file-list and text-record tasks.
+
+### 3. Check the endpoint and resolved profile
+
+```bash
+curl -fsS http://127.0.0.1:8080/health
+curl -fsS http://127.0.0.1:8080/v1/models
+cd "$HOME/kbds-tools/kbds-data-toolkit"
+opencode debug config
+opencode debug agent kbds-review
+opencode debug agent kbds-stage
+opencode debug skill
+opencode --agent kbds-review --model qwen-local/qwen3.8-27b
+```
+
+The model list must contain `qwen3.8-27b`. Both agents must resolve to
+`qwen-local/qwen3.8-27b`. Keep `enabled_providers` and `small_model` on local Qwen.
+For a different local endpoint, edit `provider.qwen-local.options.baseURL` in
+opencode.json. For a different model ID, update the provider model key and all
+model selections together. Use `/v1` in the endpoint. Restart OpenCode after edits.
+
+The profile uses a 16384-token context, early compaction and removal of old tool
+outputs. Its llama.cpp requests disable thinking and preserved thinking for
+bounded toolkit tasks. This setting affects this project, not other model clients.
+Keep the server and profile context sizes equal. Increase both only after checking
+memory use. Use compact command summaries and targeted record reads.
+
+### 4. Review first, then request staging
+
+Use OpenCode kbds-data-organizer with local Qwen API at /v1, alias qwen3.8-27b, and server context matching opencode.json (16384 tested configuration). Start in the repository root. Pin --agent kbds-review --model qwen-local/qwen3.8-27b for review. Use --agent kbds-stage with the same model for staging. Example review prompt: 'Inspect source scope and report in chat.' Example staging prompt: 'Create approved plan and wait for exact hash.' No PDF/HWP/Excel interpretation or K-BDS uploader is implemented. Respect permission/account scope limitations and local ignored policies. No automatic replay of old plans. Restart OpenCode after configuration changes.
+
+For an explicitly requested staging task, start:
 
 ```bash
 opencode --agent kbds-stage --model qwen-local/qwen3.8-27b
 ```
 
-Use the Tab key to switch between primary agents within a session. Restart OpenCode after any configuration changes. Ensure `config/policy.local.json` and `config/decisions.local.json` are updated only with explicit permission prompts. Human approval of the exact plan SHA is mandatory before applying changes.
+Use Tab to switch primary agents. Selecting kbds-stage does not approve copying.
+Approve each permission request once; do not use --auto or blanket approvals.
+Give the approved canonical source, NEW destination, workspace and explicit mode.
+After planning, inspect the full mapping reports at the paths provided in chat.
+Approve the exact plan SHA in chat before allowing apply. The agent then runs
+apply and verify and reports the validation actually performed.
 
-The launch command pins the local model. Keep the repository configuration loaded. After
-changing runtime overrides, check `opencode debug agent kbds-stage` and `opencode debug config`
-for the local model and permission rules before opening a dataset.
+Review denies bash, writes and grep. Staging allows only prompted toolkit command
+forms and edits to the two local policy/decision files. Native grep is denied
+because its permission pattern matches search expressions, not the read tool's
+blocked file paths. The rules are application controls, not an OS sandbox.
+OpenCode stores its own sessions outside the dataset. Chat-only does not mean
+that OpenCode has no internal state.
 
 ## Configure locally for staging, never in public Git
 
@@ -80,7 +147,7 @@ mode=production and allow_practice_zero_bytes=false. A folder named practice is 
 ## Inspect, ask, plan
 
 ```bash
-python3 scripts/kbds.py --policy "$PWD/config/policy.local.json" inventory
+python3 scripts/kbds.py --policy "$PWD/config/policy.local.json" inventory --summary
 python3 scripts/kbds.py --policy "$PWD/config/policy.local.json" plan --name draft-001
 ```
 
@@ -170,6 +237,11 @@ Keep partial output after failure; never merge, delete or auto-resume it.
 Practice validates paths and empty sizes only. Production checks SHA-256 and supported four-line
 KRA FASTQ/gzip/read pairs; other repositories receive byte checks only. No scientific or official
 submission validation is claimed. KRA BAM/CRAM, metadata-preparer and web UI are not implemented.
+
+Verification also compares every generated plan/TSV report with the approved plan, checks the
+copy-event sequence, and validates all completion fields. Production without KRA records
+sha256_only; practice records paths_and_empty_sizes_only. Old outputs with incorrect completion
+claims fail verification. Inspection can still read old records; verification does not repair them.
 
 ```bash
 python3 -B -m unittest discover -s tests -v

@@ -8,6 +8,7 @@
   "share": "disabled",
   "snapshot": false,
   "autoupdate": false,
+  "compaction": {"auto": true, "prune": true, "reserved": 4096},
   "provider": {
     "qwen-local": {
       "npm": "@ai-sdk/openai-compatible",
@@ -20,6 +21,7 @@
         "qwen3.8-27b": {
           "name": "Qwen3.8-27B",
           "tool_call": true,
+          "options": {"chat_template_kwargs": {"enable_thinking": false, "preserve_thinking": false}},
           "limit": {"context": 16384, "output": 2048}
         }
       }
@@ -41,7 +43,7 @@
       "mode": "primary",
       "model": "qwen-local/qwen3.8-27b",
       "temperature": 0.2,
-      "prompt": "LOAD kbds-data-organizer. Follow AGENTS.md and the skill's staging workflow. Gather user-authorized roots and confirm explicit practice or production mode. Do not act on generic mode selection alone. Request exact human plan-SHA approval before applying changes. Verify outcomes and report truthfully.",
+      "prompt": "Load kbds-data-organizer, follow AGENTS and references, confirm explicit approved roots and practice/production. Use inventory --summary and command stdout summaries; never read zero-byte FASTQ contents or entire reports just for counts. Expose full report paths. Wait for exact human plan SHA. Apply, then verify, then provide a concise truthful chat report. Selecting stage is not approval. No grep or improvised shell commands. Request exact human plan-SHA approval before applying changes.",
       "steps": 24,
       "permission": {
         "edit": {
@@ -52,6 +54,7 @@
         "bash": {
           "*": "deny",
           "python3 scripts/kbds.py --policy * inventory": "ask",
+          "python3 scripts/kbds.py --policy * inventory --summary": "ask",
           "python3 scripts/kbds.py --policy * plan --name *": "ask",
           "python3 scripts/kbds.py --policy * apply --plan * --approve-plan *": "ask",
           "python3 scripts/kbds.py --policy * verify --plan *": "ask"
@@ -67,11 +70,13 @@
       "*.env.*": "deny",
       "*.pem": "deny",
       "*.key": "deny",
+      "*id_rsa*": "deny",
+      "*id_ed25519*": "deny",
       "**/.ssh/**": "deny",
       "**/.aws/**": "deny"
     },
     "glob": "allow",
-    "grep": "allow",
+    "grep": "deny",
     "skill": {"*": "deny", "kbds-data-organizer": "allow"},
     "question": "allow",
     "external_directory": "ask"

@@ -69,7 +69,7 @@ def label(value):
 
 def sensitive(name):
     name = name.lower()
-    return (name in {".ssh", ".env", "credentials", "secrets"} or name.startswith((".env.", "id_rsa", "id_ed25519"))
+    return (name in {".ssh", ".aws", ".env", "credentials", "secrets"} or name.startswith((".env.", "id_rsa", "id_ed25519"))
             or name.endswith((".pem", ".key")))
 
 
@@ -352,19 +352,53 @@ def make_plan(policy, decisions, name):
     return plan
 
 
-def write_reports(fd, plan, prefix=""):
-    write_new(fd, prefix + "plan.json", json_bytes(plan))
-    write_new(fd, prefix + "inventory.tsv", tsv_bytes(plan["inventory"],
-        ["source_relative", "size", "sha256", "kind", "repository_candidate"]))
-    write_new(fd, prefix + "file_mapping.tsv", tsv_bytes(plan["files"],
-        ["source_relative", "destination_relative", "repository", "study", "sample", "experiment", "run", "layout", "reason", "evidence"]))
+def report_bytes(plan):
+    """The same approved-plan serialization is used for writing and verification."""
     samples = sorted({(r.get("study", ""), r.get("sample", ""), r.get("experiment", ""))
                       for r in plan["files"] if r["repository"] == "KRA"})
-    write_new(fd, prefix + "sample_mapping.tsv", tsv_bytes(
-        [dict(zip(["study", "sample", "experiment"], s)) for s in samples], ["study", "sample", "experiment"]))
-    write_new(fd, prefix + "unresolved.tsv", tsv_bytes(plan["unresolved"] +
-        [{"source_relative": "", "reason": e} for e in plan["errors"]], ["source_relative", "reason"]))
-    write_new(fd, prefix + "excluded.tsv", tsv_bytes(plan["excluded"], ["source_relative", "reason"]))
+    return {
+        "plan.json": json_bytes(plan),
+        "inventory.tsv": tsv_bytes(plan["inventory"],
+            ["source_relative", "size", "sha256", "kind", "repository_candidate"]),
+        "file_mapping.tsv": tsv_bytes(plan["files"],
+            ["source_relative", "destination_relative", "repository", "study", "sample", "experiment", "run", "layout", "reason", "evidence"]),
+        "sample_mapping.tsv": tsv_bytes(
+            [dict(zip(["study", "sample", "experiment"], s)) for s in samples], ["study", "sample", "experiment"]),
+        "unresolved.tsv": tsv_bytes(plan["unresolved"] +
+            [{"source_relative": "", "reason": e} for e in plan["errors"]], ["source_relative", "reason"]),
+        "excluded.tsv": tsv_bytes(plan["excluded"], ["source_relative", "reason"]),
+    }
+
+
+def write_reports(fd, plan, prefix=""):
+    for name, data in report_bytes(plan).items():
+        write_new(fd, prefix + name, data)
+
+
+def copy_event(index, row, total):
+    return {"event": "COPIED", "index": index, "total": total,
+            "destination_relative": row["destination_relative"]}
+
+
+def completion_record(plan):
+    practice = plan["policy"]["mode"] == "practice"
+    has_fastq = any(row["repository"] == "KRA" for row in plan["files"])
+    return {"plan_sha256": plan["plan_sha256"], "mode": plan["policy"]["mode"],
+            "files": len(plan["files"]), "submission_ready": False,
+            "validation": "paths_and_empty_sizes_only" if practice else
+                          "sha256_and_four_line_fastq" if has_fastq else "sha256_only"}
+
+
+def plan_summary(plan):
+    return {"status": plan["status"], "plan_sha256": plan["plan_sha256"],
+            **{key: plan["policy"][key] for key in ("mode", "source_root", "destination_root", "workspace_root")},
+            "inventory_files": len(plan["inventory"]), "included_files": len(plan["files"]),
+            "excluded_files": len(plan["excluded"]), "unresolved_items": len(plan["unresolved"]),
+            "error_count": len(plan["errors"]), "bytes": sum(row["size"] for row in plan["files"]),
+            "errors_preview": [error[:512] for error in plan["errors"][:10]],
+            "unresolved_preview": [{key: item[key][:512] for key in ("source_relative", "reason")}
+                                   for item in plan["unresolved"][:10]],
+            "submission_ready": False}
 
 
 def check_plan(policy, plan):
@@ -450,6 +484,7 @@ def preflight(policy, plan):
 
 def verify(policy, plan, require_complete=True):
     expected = {r["destination_relative"] for r in plan["files"]}
+    reports = report_bytes(plan)
     with directory(policy["destination_root"]) as dest:
         for row in plan["files"]:
             with regular(dest, row["destination_relative"]) as stream:
@@ -466,16 +501,22 @@ def verify(policy, plan, require_complete=True):
             for name in files:
                 require(stat.S_ISREG(os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode), "Nonregular destination entry")
                 observed.add(prefix + name)
-        report_names = {"plan.json", "inventory.tsv", "file_mapping.tsv", "sample_mapping.tsv", "unresolved.tsv", "excluded.tsv", "events.jsonl"}
-        required = expected | {"metadata/" + n for n in report_names}
+        required = expected | {"metadata/" + n for n in reports} | {"metadata/events.jsonl"}
         allowed = required | {"metadata/COMPLETE.json"}
         require(observed <= allowed, "Unexpected files in destination")
         require(required <= observed, "Missing files/reports in destination")
-        with regular(dest, "metadata/plan.json") as stream:
-            require(json.load(stream) == plan, "Stored plan differs from approved plan")
+        for name, data in reports.items():
+            with regular(dest, "metadata/" + name) as stream:
+                require(stream.read(len(data) + 1) == data, "Stored report differs from approved plan: " + name)
+        with regular(dest, "metadata/events.jsonl") as stream:
+            for index, row in enumerate(plan["files"], 1):
+                line = stream.readline(MAX_LINE + 1)
+                require(len(line) <= MAX_LINE and line, "Missing/oversized copy event")
+                require(digest(json.loads(line)) == digest(copy_event(index, row, len(expected))), "Copy event mismatch")
+            require(not stream.read(1), "Unexpected copy events")
         if require_complete:
             with regular(dest, "metadata/COMPLETE.json") as stream:
-                require(json.load(stream)["plan_sha256"] == plan["plan_sha256"], "Completion marker mismatch")
+                require(digest(json.load(stream)) == digest(completion_record(plan)), "Completion marker mismatch")
     event("VERIFIED", files=len(expected), mode=policy["mode"], submission_ready=False)
 
 
@@ -506,16 +547,13 @@ def apply(policy, plan, approval):
                         require(signature(os.fstat(inp.fileno())) == before, "Source changed during copy")
                         if policy["mode"] == "production":
                             require(h.hexdigest() == row["sha256"], "Source checksum changed")
-                    entry = {"event": "COPIED", "index": index, "total": len(plan["files"]),
-                             "destination_relative": row["destination_relative"]}
+                    entry = copy_event(index, row, len(plan["files"]))
                     log.write((json.dumps(entry) + "\n").encode())
                     log.flush()
                     os.fsync(log.fileno())
                     event("COPIED", index=index, total=len(plan["files"]))
                 verify(policy, plan, require_complete=False)
-                write_new(dest, "metadata/COMPLETE.json", json_bytes({"plan_sha256": approval,
-                    "mode": policy["mode"], "files": len(plan["files"]), "submission_ready": False,
-                    "validation": "paths_and_empty_sizes_only" if policy["mode"] == "practice" else "sha256_and_four_line_fastq"}))
+                write_new(dest, "metadata/COMPLETE.json", json_bytes(completion_record(plan)))
         event("COMPLETE", destination=str(path), submission_ready=False)
     except BaseException:
         event("FAILED_PARTIAL_DESTINATION_PRESERVED", destination=str(path))
@@ -526,7 +564,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", required=True)
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("inventory")
+    p = sub.add_parser("inventory")
+    p.add_argument("--summary", action="store_true", help="Print counts and bounded errors without the full file list")
     p = sub.add_parser("plan")
     p.add_argument("--decisions")
     p.add_argument("--name", required=True)
@@ -540,19 +579,30 @@ def main(argv=None):
         policy = load_policy(args.policy)
         if args.command == "inventory":
             records, errors = inventory(policy)
-            print(json.dumps({"files": records, "errors": errors}, indent=2))
+            result = {"files": records, "errors": errors}
+            if args.summary:
+                result = {"mode": policy["mode"], "source_root": policy["source_root"],
+                          "files": len(records), "bytes": sum(row["size"] for row in records),
+                          "error_count": len(errors), "errors_preview": [error[:512] for error in errors[:10]]}
+            print(json.dumps(result, indent=2))
             return 2 if errors else 0
         if args.command == "plan":
             decisions = load_json(args.decisions) if args.decisions else {"files": {}}
             plan = make_plan(policy, decisions, args.name)
-            print(json.dumps({"status": plan["status"], "plan_sha256": plan["plan_sha256"],
-                              "report_directory": policy["workspace_root"] + "/" + args.name}))
+            print(json.dumps({**plan_summary(plan), "report_directory": policy["workspace_root"] + "/" + args.name}))
             return 0 if plan["status"] == "READY_FOR_APPROVAL" else 2
         plan = read_plan(policy, args.plan)
         if args.command == "apply":
             apply(policy, plan, args.approve_plan)
         else:
             verify(policy, plan)
+        print(json.dumps({**plan_summary(plan), "status": "COMPLETE" if args.command == "apply" else "VERIFIED",
+                          "package_validation": completion_record(plan)["validation"],
+                          "validation": completion_record(plan)["validation"] if args.command == "apply" else
+                                        "paths_and_empty_sizes_only" if policy["mode"] == "practice" else "sha256_only",
+                          "metadata_verified": True,
+                          "fastq_files_checked": sum(row["repository"] == "KRA" for row in plan["files"])
+                                                 if args.command == "apply" and policy["mode"] == "production" else 0}))
         return 0
     except (Blocked, OSError, EOFError, KeyError, TypeError, json.JSONDecodeError, zlib.error) as exc:
         event("BLOCKED", reason=str(exc))

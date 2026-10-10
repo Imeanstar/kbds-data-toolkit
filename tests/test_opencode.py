@@ -16,7 +16,7 @@ class OpenCodeProfileTest(unittest.TestCase):
         self.assertEqual(config["agent"]["kbds-review"]["mode"], "primary")
         self.assertEqual(config["agent"]["kbds-review"]["model"], config["model"])
         self.assertEqual(config["permission"]["*"], "deny")
-        for tool in ("edit", "bash", "task", "webfetch", "websearch"):
+        for tool in ("edit", "bash", "grep", "task", "webfetch", "websearch"):
             self.assertEqual(config["permission"].get(tool, "deny"), "deny")
         self.assertEqual(config["permission"]["external_directory"], "ask")
         self.assertEqual(config["permission"]["skill"]["kbds-data-organizer"], "allow")
@@ -27,6 +27,10 @@ class OpenCodeProfileTest(unittest.TestCase):
         self.assertEqual(config["subagent_depth"], 0)
         self.assertEqual(config["provider"]["qwen-local"]["options"]["baseURL"],
                          "http://127.0.0.1:8080/v1")
+        self.assertEqual(config["compaction"], {"auto": True, "prune": True, "reserved": 4096})
+        model = config["provider"]["qwen-local"]["models"]["qwen3.8-27b"]
+        self.assertEqual(model["options"]["chat_template_kwargs"],
+                         {"enable_thinking": False, "preserve_thinking": False})
 
     def test_staging_requires_permission_without_source_or_code_edits(self):
         root = Path(__file__).resolve().parents[1]
@@ -44,6 +48,7 @@ class OpenCodeProfileTest(unittest.TestCase):
 
         for command in (
             "python3 scripts/kbds.py --policy /approved/policy.local.json inventory",
+            "python3 scripts/kbds.py --policy /approved/policy.local.json inventory --summary",
             "python3 scripts/kbds.py --policy /approved/policy.local.json plan --name reviewed-001 --decisions /approved/decisions.local.json",
             "python3 scripts/kbds.py --policy /approved/policy.local.json apply --plan /approved/work/reviewed-001/plan.json --approve-plan PLAN_HASH",
             "python3 scripts/kbds.py --policy /approved/policy.local.json verify --plan /approved/work/reviewed-001/plan.json",
