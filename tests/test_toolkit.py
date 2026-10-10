@@ -436,6 +436,21 @@ class ToolkitTests(unittest.TestCase):
         marker = json.loads((self.dest / "metadata/COMPLETE.json").read_text())
         self.assertEqual(marker["validation"], "sha256_only")
 
+    def test_sensitive_roots_and_direct_files_block_before_open(self):
+        secret_root = self.src / ".aws"
+        secret_root.mkdir()
+        (secret_root / "config").write_text("SYNTHETIC_SENTINEL_ONLY")
+        with mock.patch.object(t.os, "open", side_effect=AssertionError("Sensitive directory opened")):
+            with self.assertRaises(t.Blocked), t.directory(str(secret_root)):
+                pass
+            with self.assertRaises(t.Blocked):
+                t.inventory({**self.policy, "source_root": str(secret_root)})
+        (self.src / ".env").write_text("SYNTHETIC_SENTINEL_ONLY")
+        with t.directory(str(self.src)) as fd:
+            with mock.patch.object(t.os, "open", side_effect=AssertionError("Sensitive file opened")):
+                with self.assertRaises(t.Blocked), t.regular(fd, ".env"):
+                    pass
+
     def test_aws_directory_is_blocked_before_opening(self):
         self.policy.update(mode="production", allow_practice_zero_bytes=False)
         (self.src / ".aws").mkdir()

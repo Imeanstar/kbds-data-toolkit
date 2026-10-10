@@ -81,6 +81,7 @@ def directory(path, create=False):
     """Walk from / without following symlinks, including ancestor components."""
     require(FILESYSTEM_SUPPORTED, "Filesystem operations require Linux; do not weaken no-follow checks")
     absolute(path)
+    require(not any(sensitive(name) for name in parts(path[1:])), "Sensitive directory path blocked")
     fd = os.open("/", DIR_FLAGS)
     try:
         for component in path[1:].split("/"):
@@ -118,6 +119,7 @@ def parent_at(root_fd, relative, create=False):
 
 @contextlib.contextmanager
 def regular(root_fd, relative, new=False):
+    require(not any(sensitive(name) for name in parts(relative)), "Sensitive file path blocked")
     with parent_at(root_fd, relative, create=new) as (parent, name):
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW if new else READ_FLAGS
         fd = os.open(name, flags, 0o600, dir_fd=parent)
