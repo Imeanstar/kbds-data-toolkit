@@ -7,7 +7,9 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -21,10 +23,11 @@ def module(name, path):
     return obj
 
 
-t = module("toolkit", ROOT / ".agents/skills/kbds-data-organizer/scripts/toolkit.py")
+t = module("toolkit", ROOT / "skills/kbds-data-organizer/scripts/toolkit.py")
 remote = module("remote", ROOT / "scripts/remote_stage.py")
 
 
+@unittest.skipUnless(t.FILESYSTEM_SUPPORTED, "Linux no-follow filesystem integration required")
 class ToolkitTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -242,13 +245,78 @@ class ToolkitTests(unittest.TestCase):
     def test_ssh_wrapper_no_insecure_host_key_option(self):
         args = argparse.Namespace(host="lab-test", remote_tool="/srv/toolkit/scripts/kbds.py",
                                   policy="/srv/config/policy.json", plan=None, decisions=None,
-                                  action="inventory", name=None, approve_plan=None)
+                                  action="inventory", name=None, approve_plan=None, user=None,
+                                  port=None, ssh=None, local_tool=None)
         cmd = remote.build_command(args)
         self.assertIn("StrictHostKeyChecking=yes", cmd)
         self.assertIn("ForwardAgent=no", cmd)
         args.host = "-oProxyCommand=bad"
         with self.assertRaises(ValueError):
             remote.build_command(args)
+
+    def test_local_tool_is_streamed_without_remote_install(self):
+        tool = self.base / "tool.py"
+        tool.write_text("print('safe')\n")
+        policy = self.base / "policy.json"
+        policy.write_text(json.dumps(self.policy))
+        args = argparse.Namespace(remote_tool=None, local_tool=str(tool),
+                                  policy=None, local_policy=str(policy), plan=None, decisions=None,
+                                  local_decisions=None, action="inventory", name=None,
+                                  approve_plan=None)
+        command = remote.remote_command(args)
+        self.assertIn("python3 -I -c", command)
+        self.assertIn("<kbds-data-organizer>", command)
+        self.assertIn("--policy-data", command)
+        self.assertNotIn(str(tool), command)
+        self.assertNotIn(str(policy), command)
+        self.assertNotIn("/srv/toolkit", command)
+        encoded = remote.encoded_local_json(policy, "policy")
+        self.assertEqual(t.decode_json(encoded, "policy"), self.policy)
+
+    def test_generic_remote_shell_action_is_absent(self):
+        with self.assertRaises(SystemExit):
+            remote.main(["bridge-exec"])
+
+    def test_password_bridge_is_user_owned_and_disables_forwarding(self):
+        cmd = remote.session_command("git-ssh", "192.0.2.1", "research", 708)
+        self.assertEqual(cmd[-2:], ["192.0.2.1", "sh"])
+        self.assertIn("-T", cmd)
+        self.assertNotIn("-M", cmd)
+        self.assertIn("StrictHostKeyChecking=ask", cmd)
+        self.assertIn("ForwardAgent=no", cmd)
+        self.assertIn("ClearAllForwardings=yes", cmd)
+
+    def test_password_bridge_queue_runs_through_its_own_mux(self):
+        requests = self.base / "requests"
+        responses = self.base / "responses"
+        requests.mkdir()
+        responses.mkdir()
+        token = "a" * 64
+        request = requests / ("1" * 32 + ".request.json")
+        request.write_text(json.dumps({"token": token, "operation": "run",
+                                       "command": "printf safe"}))
+        marker = "__KBDS_" + token + "_" + "1" * 32
+        session = argparse.Namespace(poll=lambda: None, stdin=io.BytesIO(),
+                                     stdout=io.BytesIO((marker + "_BEGIN__\nsafe\n" +
+                                                        marker + "_END__:0\n").encode()))
+        closing, response = remote.handle_request(request, responses, token, session)
+        self.assertFalse(closing)
+        self.assertEqual(json.loads(response.read_text())["stdout"], "safe")
+        self.assertIn(b"printf safe", session.stdin.getvalue())
+
+    def test_password_bridge_preserves_exact_stdout_in_a_real_shell(self):
+        session = subprocess.Popen(["sh"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0)
+        timeout = threading.Timer(5, session.kill)
+        timeout.start()
+        try:
+            for index, (command, expected) in enumerate(
+                    [("printf safe", "safe"), ("printf 'safe\\n'", "safe\n"), ("true", "")]):
+                self.assertEqual(remote.run_session_command(session, command, "a" * 64, f"{index:032x}"),
+                                 (0, expected))
+        finally:
+            timeout.cancel()
+            session.terminate()
+            session.communicate(timeout=5)
 
     def test_sensitive_directory_is_not_scanned(self):
         (self.src / ".ssh").mkdir()

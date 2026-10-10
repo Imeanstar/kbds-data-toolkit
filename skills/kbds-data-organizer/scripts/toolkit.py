@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import contextlib
 import csv
 import gzip
@@ -19,11 +21,12 @@ import unicodedata
 import zlib
 
 VERSION = 1
-DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+FILESYSTEM_SUPPORTED = sys.platform.startswith("linux")
+DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW if FILESYSTEM_SUPPORTED else None
+READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK if FILESYSTEM_SUPPORTED else None
 FASTQ = re.compile(r"\.(?:fastq|fq)(?:\.gz)?$", re.I)
 PAIR = re.compile(r"^(.*?)[_-]R?([12])(_[0-9]+)?(\.(?:fastq|fq)(?:\.gz)?)$", re.I)
-REPOSITORIES = {"KRA", "KEA", "KVar", "KNA", "review"}
+REPOSITORIES = {"KRA", "KEA", "GEO", "KVar", "KNA", "review"}
 MAX_LINE = 16 * 1024 * 1024
 
 
@@ -76,6 +79,7 @@ def sensitive(name):
 @contextlib.contextmanager
 def directory(path, create=False):
     """Walk from / without following symlinks, including ancestor components."""
+    require(FILESYSTEM_SUPPORTED, "Filesystem operations require Linux; do not weaken no-follow checks")
     absolute(path)
     fd = os.open("/", DIR_FLAGS)
     try:
@@ -147,11 +151,26 @@ def load_json(path):
             return json.load(stream)
 
 
-def load_policy(path):
-    policy = load_json(path)
-    require(isinstance(policy, dict) and set(policy) == {
+def decode_json(value, label):
+    try:
+        packed = base64.b64decode(value, validate=True)
+        try:
+            packed = zlib.decompress(packed)
+        except zlib.error:
+            pass
+        return json.loads(packed.decode("utf-8"))
+    except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise Blocked("Invalid encoded " + label) from exc
+
+
+def load_policy(path=None, data=None):
+    policy = load_json(path) if path else decode_json(data, "policy")
+    required = {
         "version", "mode", "source_root", "destination_root", "workspace_root",
-        "allow_practice_zero_bytes", "reserve_bytes"}, "Unknown/missing policy keys")
+        "allow_practice_zero_bytes", "reserve_bytes"}
+    require(isinstance(policy, dict) and required <= set(policy) and
+            set(policy) <= required | {"layout_version", "repository_scope"}, "Unknown/missing policy keys")
+    validate_layout_policy(policy)
     require(policy["version"] == VERSION, "Unsupported policy version")
     require(policy["mode"] in ("practice", "production"), "Mode must be explicit")
     require(policy["allow_practice_zero_bytes"] is (policy["mode"] == "practice"),
@@ -169,6 +188,20 @@ def load_policy(path):
     return policy
 
 
+def validate_layout_policy(policy):
+    version = policy.get("layout_version", 1)
+    require(type(version) is int and version in (1, 2), "Unsupported layout_version")
+    if version == 1:
+        require("repository_scope" not in policy, "repository_scope requires layout_version 2")
+        return
+    scope = policy.get("repository_scope")
+    require(scope in REPOSITORIES, "Select one repository_scope per output plan")
+    source, destination = (PurePosixPath(absolute(policy[k])) for k in ("source_root", "destination_root"))
+    require(destination.parent == source.parent, "Makeup output must be a sibling of its source")
+    require(destination.name in (source.name + "_makeup", source.name + "_" + scope + "_makeup"),
+            "Use <source>_makeup or <source>_<repository>_makeup")
+
+
 def classify(path):
     low = path.lower()
     if FASTQ.search(low):
@@ -181,11 +214,33 @@ def classify(path):
         return "sequence_candidate", "KNA"
     if low.endswith((".bam", ".cram", ".sam")):
         return "alignment_requires_review", "review"
+    name = PurePosixPath(low).name.removesuffix(".gz")
+    if name == "matrix.mtx":
+        return "count_matrix_candidate", "GEO"
+    if name in ("barcodes.tsv", "features.tsv", "genes.tsv"):
+        return "matrix_companion_candidate", "GEO"
     if any(x in low for x in ("samplesheet", "manifest", "metadata")):
         return "metadata_candidate", "review"
-    if re.search(r"count|expression|deg", low) and low.endswith((".tsv", ".csv", ".txt", ".xlsx", ".xls")):
-        return "expression_candidate", "KEA"
+    if re.search(r"count|expression", name) and name.endswith((".tsv", ".csv", ".txt", ".mtx", ".h5", ".h5ad", ".xlsx", ".xls")):
+        return "expression_candidate", "GEO"
+    if "deg" in name and name.endswith((".tsv", ".csv", ".txt", ".xlsx", ".xls")):
+        return "functional_genomics_candidate", "KEA"
     return "unknown", "review"
+
+
+def annotate_matrix_candidates(records):
+    """Same-directory MEX trio is evidence to review, never an automatic FASTQ assignment."""
+    groups = {}
+    for row in records:
+        p = PurePosixPath(row["source_relative"])
+        groups.setdefault(str(p.parent), set()).add(p.name.lower().removesuffix(".gz"))
+    for row in records:
+        p = PurePosixPath(row["source_relative"])
+        names = groups[str(p.parent)]
+        trio = {"matrix.mtx", "barcodes.tsv"} <= names and bool(names & {"features.tsv", "genes.tsv"})
+        if trio and p.name.lower().removesuffix(".gz") in {"matrix.mtx", "barcodes.tsv", "features.tsv", "genes.tsv"}:
+            row["modality_candidate"] = "single_cell"
+            row["modality_candidate_evidence"] = "Same-directory MEX trio; confirm cell/nucleus/spatial protocol and FASTQ linkage"
 
 
 def inventory(policy):
@@ -219,6 +274,8 @@ def inventory(policy):
                 except (OSError, Blocked) as exc:
                     errors.append(rel + ": " + str(exc))
     records.sort(key=lambda r: r["source_relative"])
+    if policy.get("layout_version", 1) == 2:
+        annotate_matrix_candidates(records)
     event("INVENTORY", files=len(records), errors=len(errors), mode=policy["mode"])
     return records, errors
 
@@ -231,9 +288,37 @@ def pair_key(path):
     return str(p.parent) + "/" + stem + (chunk or "") + extension.lower(), mate
 
 
-def target_path(row):
+def target_path(row, policy=None):
     parts(row["source_relative"])
     require(row["repository"] in REPOSITORIES, "Unsupported repository")
+    if policy and policy.get("layout_version", 1) == 2:
+        validate_layout_policy(policy)
+        require(row["repository"] == policy["repository_scope"], "Repository differs from output scope")
+        require(row.get("modality") in ("bulk", "single_cell"), "Confirm bulk/single_cell; absence of a matrix is not bulk evidence")
+        for key in ("reason", "evidence", "modality_evidence"):
+            require(isinstance(row.get(key), str) and row[key].strip(), "Missing " + key)
+        prefix = PurePosixPath(policy["destination_root"]).name + "_" + row["modality"]
+        segments = [prefix, label(row["study"])]
+        if row["repository"] == "KRA":
+            require(row.get("sample_group") in ("B", "D", "R"), "Confirm B/D/R Sample grouping")
+            for key in ("sample", "specimen", "assay", "experiment", "run"):
+                label(row.get(key))
+            require(row.get("data_role") == "raw_reads", "Confirm raw-read role")
+            role = row.get("file_role", "")
+            require(role in ("R1", "R2", "single"), "Confirm R1/R2 or single file_role")
+            if row.get("layout") == "PAIRED":
+                require(role.endswith("R" + pair_key(row["source_relative"])[1]), "file_role disagrees with mate suffix")
+            else:
+                require(role.endswith("single"), "SINGLE layout requires a single role")
+            segments += [row["sample_group"], row["sample"], row["experiment"], row["run"], role,
+                         PurePosixPath(row["source_relative"]).name]
+        else:
+            require(isinstance(row.get("data_role"), str) and row["data_role"].strip(), "Confirm processed data role")
+            if row["source_relative"].lower().endswith((".bam", ".cram", ".sam")):
+                require(row["repository"] == "KEA" and row["data_role"] == "processed_functional_genomics",
+                        "Alignment requires confirmed functional-genomics KEA routing; BAM alone is insufficient")
+            segments += parts(row["source_relative"])
+        return "/".join(segments)
     segments = [row["repository"], label(row["study"])]
     if row["repository"] == "KRA":
         segments += [label(row[k]) for k in ("sample", "experiment", "run")]
@@ -243,13 +328,13 @@ def target_path(row):
     return "/".join(segments)
 
 
-def validate_rows(rows, mode):
-    seen, pairs, experiments, sources = set(), {}, {}, set()
+def validate_rows(rows, mode, policy=None):
+    seen, pairs, experiments, sources, runs = set(), {}, {}, set(), {}
     for row in rows:
         require(row["source_relative"] not in sources, "A source is included more than once")
         sources.add(row["source_relative"])
         target = row["destination_relative"]
-        require(target == target_path(row), "Destination must follow the approved naming scheme")
+        require(target == target_path(row, policy), "Destination must follow the approved naming scheme")
         parts(target)
         normalized = unicodedata.normalize("NFC", target).casefold()
         require(normalized not in seen, "Destination collision: " + target)
@@ -267,6 +352,13 @@ def validate_rows(rows, mode):
         experiment = tuple(row[k] for k in ("study", "sample", "experiment"))
         previous = experiments.setdefault(experiment, row["layout"])
         require(previous == row["layout"], "Conflicting layouts within an experiment")
+        if policy and policy.get("layout_version", 1) == 2:
+            identity = (row["modality"], row["sample_group"], row["specimen"], row["assay"])
+            require(experiments.setdefault(("identity",) + experiment, identity) == identity,
+                    "An Experiment cannot merge different specimens/assays/modalities")
+            run = (row["study"], row["sample_group"], row["sample"], row["experiment"], row["run"])
+            pair = pair_key(row["source_relative"])[0] if row["layout"] == "PAIRED" else row["source_relative"]
+            require(runs.setdefault(run, pair) == pair, "Different read pairs require distinct Runs")
         if row["layout"] == "PAIRED":
             key, mate = pair_key(row["source_relative"])
             group = pairs.setdefault(key, {})
@@ -277,6 +369,11 @@ def validate_rows(rows, mode):
         a, b = group["1"], group["2"]
         require(all(a[k] == b[k] for k in ("repository", "study", "sample", "experiment", "run", "layout")),
                 "Mates assigned to different experiments/runs")
+        if policy and policy.get("layout_version", 1) == 2:
+            require(all(a[k] == b[k] for k in ("sample_group", "specimen", "assay", "modality", "data_role")),
+                    "Mates assigned conflicting metadata")
+            require(a["file_role"] == "R1" and b["file_role"] == "R2",
+                    "Mates assigned different R1/R2 file roles")
     return pairs
 
 
@@ -301,6 +398,7 @@ def tsv_bytes(rows, columns):
 
 def make_plan(policy, decisions, name):
     label(name)
+    validate_layout_policy(policy)
     require(isinstance(decisions, dict) and set(decisions) == {"files"}, "Decisions require a files mapping")
     require(isinstance(decisions["files"], dict), "files must map exact source-relative paths to decisions")
     records, errors = inventory(policy)
@@ -314,7 +412,9 @@ def make_plan(policy, decisions, name):
         try:
             require(isinstance(decision, dict), "Needs user decision: include/exclude and rationale")
             require(set(decision) <= {"action", "reason", "evidence", "repository", "study", "sample",
-                                      "experiment", "run", "layout", "raw_confirmed"}, "Unknown decision field")
+                                      "experiment", "run", "layout", "raw_confirmed", "sample_group",
+                                      "specimen", "assay", "modality", "modality_evidence", "file_role",
+                                      "data_role"}, "Unknown decision field")
             require(isinstance(decision.get("reason"), str) and decision["reason"].strip(), "Missing decision reason")
             if decision.get("action") == "exclude":
                 excluded.append({"source_relative": rel, "reason": decision["reason"]})
@@ -323,14 +423,14 @@ def make_plan(policy, decisions, name):
             require(isinstance(decision.get("evidence"), str) and decision["evidence"].strip(), "Missing evidence/user-confirmation record")
             require(decision.get("repository") in REPOSITORIES, "Repository must be explicitly selected")
             row = {**record, **decision}
-            row["destination_relative"] = target_path(row)
+            row["destination_relative"] = target_path(row, policy)
             rows.append(row)
         except (Blocked, KeyError) as exc:
             unresolved.append({"source_relative": rel, "reason": str(exc)})
     if not records:
         errors.append("No regular files found")
     try:
-        validate_rows(rows, policy["mode"])
+        validate_rows(rows, policy["mode"], policy)
     except (Blocked, KeyError) as exc:
         errors.append(str(exc))
     if os.path.lexists(policy["destination_root"]):
@@ -354,16 +454,21 @@ def make_plan(policy, decisions, name):
 
 def report_bytes(plan):
     """The same approved-plan serialization is used for writing and verification."""
-    samples = sorted({(r.get("study", ""), r.get("sample", ""), r.get("experiment", ""))
+    inventory_columns = ["source_relative", "size", "sha256", "kind", "repository_candidate"]
+    mapping_columns = ["source_relative", "destination_relative", "repository", "study", "sample", "experiment", "run", "layout", "reason", "evidence"]
+    sample_columns = ["study", "sample", "experiment"]
+    if plan["policy"].get("layout_version", 1) == 2:
+        inventory_columns += ["modality_candidate", "modality_candidate_evidence"]
+        mapping_columns = ["source_relative", "destination_relative", "repository", "study", "sample_group", "sample", "specimen",
+                           "assay", "experiment", "run", "layout", "modality", "file_role", "data_role", "reason", "evidence", "modality_evidence"]
+        sample_columns = ["study", "sample_group", "sample", "specimen", "assay", "experiment", "modality"]
+    samples = sorted({tuple(r.get(k, "") for k in sample_columns)
                       for r in plan["files"] if r["repository"] == "KRA"})
     return {
         "plan.json": json_bytes(plan),
-        "inventory.tsv": tsv_bytes(plan["inventory"],
-            ["source_relative", "size", "sha256", "kind", "repository_candidate"]),
-        "file_mapping.tsv": tsv_bytes(plan["files"],
-            ["source_relative", "destination_relative", "repository", "study", "sample", "experiment", "run", "layout", "reason", "evidence"]),
-        "sample_mapping.tsv": tsv_bytes(
-            [dict(zip(["study", "sample", "experiment"], s)) for s in samples], ["study", "sample", "experiment"]),
+        "inventory.tsv": tsv_bytes(plan["inventory"], inventory_columns),
+        "file_mapping.tsv": tsv_bytes(plan["files"], mapping_columns),
+        "sample_mapping.tsv": tsv_bytes([dict(zip(sample_columns, s)) for s in samples], sample_columns),
         "unresolved.tsv": tsv_bytes(plan["unresolved"] +
             [{"source_relative": "", "reason": e} for e in plan["errors"]], ["source_relative", "reason"]),
         "excluded.tsv": tsv_bytes(plan["excluded"], ["source_relative", "reason"]),
@@ -402,12 +507,13 @@ def plan_summary(plan):
 
 
 def check_plan(policy, plan):
+    validate_layout_policy(policy)
     require(plan.get("plan_sha256") == digest({k: v for k, v in plan.items() if k != "plan_sha256"}), "Plan hash mismatch")
     require(plan["version"] == VERSION and plan["policy"] == policy, "Policy/plan changed; rebuild and reapprove")
     require(plan["status"] == "READY_FOR_APPROVAL" and not plan["unresolved"] and not plan["errors"],
             "Unresolved/blocked plan cannot execute")
     require(plan["files"], "Empty plan cannot execute")
-    validate_rows(plan["files"], policy["mode"])
+    validate_rows(plan["files"], policy["mode"], policy)
     by_path = {r["source_relative"]: r for r in plan["inventory"]}
     included = {r["source_relative"] for r in plan["files"]}
     excluded = {r["source_relative"] for r in plan["excluded"]}
@@ -464,7 +570,7 @@ def preflight(policy, plan):
     require(not os.path.lexists(policy["destination_root"]), "Destination must not exist")
     if policy["mode"] == "production":
         with directory(policy["source_root"]) as root:
-            pairs = validate_rows(plan["files"], "production")
+            pairs = validate_rows(plan["files"], "production", policy)
             paired_paths = set()
             for group in pairs.values():
                 a, b = group["1"], group["2"]
@@ -562,12 +668,16 @@ def apply(policy, plan, approval):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--policy", required=True)
+    policy_group = parser.add_mutually_exclusive_group(required=True)
+    policy_group.add_argument("--policy")
+    policy_group.add_argument("--policy-data")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("inventory")
     p.add_argument("--summary", action="store_true", help="Print counts and bounded errors without the full file list")
     p = sub.add_parser("plan")
-    p.add_argument("--decisions")
+    decision_group = p.add_mutually_exclusive_group()
+    decision_group.add_argument("--decisions")
+    decision_group.add_argument("--decisions-data")
     p.add_argument("--name", required=True)
     for command in ("apply", "verify"):
         p = sub.add_parser(command)
@@ -576,7 +686,7 @@ def main(argv=None):
             p.add_argument("--approve-plan", required=True)
     args = parser.parse_args(argv)
     try:
-        policy = load_policy(args.policy)
+        policy = load_policy(args.policy, args.policy_data)
         if args.command == "inventory":
             records, errors = inventory(policy)
             result = {"files": records, "errors": errors}
@@ -587,7 +697,9 @@ def main(argv=None):
             print(json.dumps(result, indent=2))
             return 2 if errors else 0
         if args.command == "plan":
-            decisions = load_json(args.decisions) if args.decisions else {"files": {}}
+            decisions = (load_json(args.decisions) if args.decisions else
+                         decode_json(args.decisions_data, "decisions") if args.decisions_data else
+                         {"files": {}})
             plan = make_plan(policy, decisions, args.name)
             print(json.dumps({**plan_summary(plan), "report_directory": policy["workspace_root"] + "/" + args.name}))
             return 0 if plan["status"] == "READY_FOR_APPROVAL" else 2

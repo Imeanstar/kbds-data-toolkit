@@ -4,6 +4,7 @@
   "model": "qwen-local/qwen3.8-27b",
   "small_model": "qwen-local/qwen3.8-27b",
   "default_agent": "kbds-review",
+  "skills": {"paths": ["./skills"]},
   "subagent_depth": 0,
   "share": "disabled",
   "snapshot": false,
@@ -43,7 +44,7 @@
       "mode": "primary",
       "model": "qwen-local/qwen3.8-27b",
       "temperature": 0.2,
-      "prompt": "Load kbds-data-organizer, follow AGENTS and references, confirm explicit approved roots and practice/production. Use inventory --summary and command stdout summaries; never read zero-byte FASTQ contents or entire reports just for counts. Expose full report paths. Wait for exact human plan SHA. Apply, then verify, then provide a concise truthful chat report. Selecting stage is not approval. No grep or improvised shell commands. Request exact human plan-SHA approval before applying changes.",
+      "prompt": "Load kbds-data-organizer, follow AGENTS and references, confirm explicit approved roots and practice/production. Use inventory --summary and command stdout summaries; never read zero-byte FASTQ contents or entire reports just for counts. Expose full report paths. Wait for exact human plan SHA. Apply after approval. If an HTML report was requested, run the report command, which verifies before writing. Otherwise run verify. Report only checks actually performed. Selecting stage is not approval. No grep or improvised shell commands. Request exact human plan-SHA approval before applying changes.",
       "steps": 24,
       "permission": {
         "edit": {
@@ -53,11 +54,13 @@
         },
         "bash": {
           "*": "deny",
+          "python3 scripts/kbds.py self-check": "ask",
           "python3 scripts/kbds.py --policy * inventory": "ask",
           "python3 scripts/kbds.py --policy * inventory --summary": "ask",
           "python3 scripts/kbds.py --policy * plan --name *": "ask",
           "python3 scripts/kbds.py --policy * apply --plan * --approve-plan *": "ask",
-          "python3 scripts/kbds.py --policy * verify --plan *": "ask"
+          "python3 scripts/kbds.py --policy * verify --plan *": "ask",
+          "python3 scripts/kbds.py report --plan *": "ask"
         }
       }
     }
