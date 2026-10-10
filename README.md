@@ -32,6 +32,9 @@ The new default workflow: install OpenCode, clone the repository, start the exis
 
 With OpenCode installed and the local Qwen server running:
 
+Use a server context size of at least 16384 tokens, matching opencode.json. An 8192-token
+server can reject the request after the skill and its references have been loaded.
+
 ```bash
 git clone https://github.com/Imeanstar/kbds-data-toolkit.git
 cd kbds-data-toolkit
