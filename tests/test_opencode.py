@@ -34,7 +34,12 @@ class OpenCodeProfileTest(unittest.TestCase):
         model = config["provider"]["qwen-local"]["models"]["qwen3.8-27b"]
         self.assertEqual(model["limit"], {"context": 16384, "input": 16384, "output": 2048})
         self.assertGreaterEqual(config["compaction"]["reserved"], model["limit"]["output"])
-        self.assertEqual(config["agent"]["compaction"]["model"], config["model"])
+        compact_name = config["agent"]["compaction"]["model"]
+        self.assertEqual(compact_name, "qwen-local/qwen3.8-27b-compact")
+        compact = config["provider"]["qwen-local"]["models"][compact_name.split("/", 1)[1]]
+        self.assertEqual(compact["id"], "qwen3.8-27b")
+        self.assertEqual(compact["options"], model["options"])
+        self.assertEqual(compact["limit"], {"context": 16384, "input": 16384, "output": 1024})
         self.assertEqual(model["options"]["chat_template_kwargs"],
                          {"enable_thinking": False, "preserve_thinking": False})
 

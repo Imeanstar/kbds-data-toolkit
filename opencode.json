@@ -24,15 +24,22 @@
           "tool_call": true,
           "options": {"chat_template_kwargs": {"enable_thinking": false, "preserve_thinking": false}},
           "limit": {"context": 16384, "input": 16384, "output": 2048}
+        },
+        "qwen3.8-27b-compact": {
+          "id": "qwen3.8-27b",
+          "name": "Qwen3.8-27B (bounded summary)",
+          "tool_call": true,
+          "options": {"chat_template_kwargs": {"enable_thinking": false, "preserve_thinking": false}},
+          "limit": {"context": 16384, "input": 16384, "output": 1024}
         }
       }
     }
   },
   "agent": {
     "compaction": {
-      "model": "qwen-local/qwen3.8-27b",
+      "model": "qwen-local/qwen3.8-27b-compact",
       "hidden": true,
-      "prompt": "Write a continuation note of at most 250 words. Preserve exact source/output/workspace and control/plan paths, mode, repository scope, full plan hash and status, actual completed calls, pending questions and the next permitted command. Distinguish candidates from confirmed facts, a denied access request from proof that a path exists, and scope answers from exact human copy approval. Never infer approval, biological facts or successful checks. State whether mandatory references were already read; do not repeat their content or dump inventories. Source stays immutable; only bundled commands and two private config files are permitted. No external models, delegation or upload. Keep unresolved items and submission_ready=false. Use brief Korean prose and literal paths/commands."
+      "prompt": "Fill the required summary sections in at most 200 words total. Use one short bullet per section and do not repeat paths in Relevant Files. Put exact human copy approval state, plan status/hash and unresolved items first in Important Details. Preserve exact source/output/workspace and control/plan paths, mode, repository scope, actual completed calls, pending questions and next permitted command. Candidates are not facts; denied access is not path-existence proof. Never infer approval, biology or successful checks. Preserve which mandatory references were already read; resume without reloading unchanged documents. Source stays immutable. Only bundled commands and two private config files; no external models, delegation or upload. submission_ready=false. Use brief Korean and literal paths/commands."
     },
     "build": {"disable": true},
     "plan": {"disable": true},
