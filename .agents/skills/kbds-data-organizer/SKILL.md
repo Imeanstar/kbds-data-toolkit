@@ -31,6 +31,10 @@ Require an approved local JSON policy with three disjoint absolute roots: source
 destination (new output) and workspace (new planning reports). Never substitute a similar
 path or add another volume. Use only the explicitly selected mode, not a folder-name guess.
 
+## OpenCode review and staging modes
+
+Treat SKILL.md and AGENTS.md as strict operational instructions, not sandbox boundaries. Prohibit shell chains, redirections, and direct source/script edits. Only execute `python3 scripts/kbds.py --policy ...` from the repository root. Config changes to `policy.local.json` and `decisions.local.json` require explicit permission prompts. Never use `--auto` or blanket approvals. Source data is immutable; only write to new destinations. Preserve partial failures. If symlinks exist, request approved canonical roots. No external models or subagents. Selecting a stage is not plan approval; exact human plan-SHA approval is mandatory before applying changes. Verify results and provide a truthful chat report.
+
 ## Staging workflow (opt-in)
 
 1. Inspect the scoped source with `inventory`. Report actual counts and errors. Unreadable

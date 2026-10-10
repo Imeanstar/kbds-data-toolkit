@@ -1,5 +1,6 @@
 """Keep the bundled inspection profile read-only and on the approved local model."""
 import json
+from fnmatch import fnmatchcase
 import unittest
 from pathlib import Path
 
@@ -26,3 +27,33 @@ class OpenCodeProfileTest(unittest.TestCase):
         self.assertEqual(config["subagent_depth"], 0)
         self.assertEqual(config["provider"]["qwen-local"]["options"]["baseURL"],
                          "http://127.0.0.1:8080/v1")
+
+    def test_staging_requires_permission_without_source_or_code_edits(self):
+        root = Path(__file__).resolve().parents[1]
+        config = json.loads((root / "opencode.json").read_text())
+        stage = config["agent"]["kbds-stage"]
+        self.assertEqual(stage["mode"], "primary")
+        self.assertEqual(stage["model"], config["model"])
+
+        def action(tool, value):
+            result = config["permission"]["*"]
+            for pattern, permission in stage["permission"][tool].items():
+                if fnmatchcase(value, pattern):
+                    result = permission
+            return result
+
+        for command in (
+            "python3 scripts/kbds.py --policy /approved/policy.local.json inventory",
+            "python3 scripts/kbds.py --policy /approved/policy.local.json plan --name reviewed-001 --decisions /approved/decisions.local.json",
+            "python3 scripts/kbds.py --policy /approved/policy.local.json apply --plan /approved/work/reviewed-001/plan.json --approve-plan PLAN_HASH",
+            "python3 scripts/kbds.py --policy /approved/policy.local.json verify --plan /approved/work/reviewed-001/plan.json",
+        ):
+            self.assertEqual(action("bash", command), "ask")
+        for command in ("rm -rf /data", "cp -r /source /destination", "python3 -c 'print(1)'",
+                        "git restore .", "sudo chmod 777 /data", "curl https://example.com"):
+            self.assertEqual(action("bash", command), "deny")
+        for file in ("config/policy.local.json", "config/decisions.local.json"):
+            self.assertEqual(action("edit", file), "ask")
+        for file in ("opencode.json", "AGENTS.md", "scripts/kbds.py", "source/sample_R1.fastq.gz",
+                     "../source/sample_R1.fastq.gz", ".agents/skills/kbds-data-organizer/scripts/toolkit.py"):
+            self.assertEqual(action("edit", file), "deny")
