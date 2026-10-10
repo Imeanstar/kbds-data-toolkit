@@ -5,10 +5,16 @@ description: Prepare human-reviewed, copy-only K-BDS staging directories from a 
 
 # KBDS Data Organizer
 
+## Default inspection and chat report
+
+Load required references, scope, and practice versus production distinctions. Perform read-only file-list and existing-record review. Check counts, sizes, and filename pairs only when tools actually expose that evidence. State truthful limits if counts come only from old records or partial listings. Do not make biological assumptions from names. Do not validate content from zero-byte practice files. Report directly in chat by default. Include model identity, repo revision if available, actually read evidence, actual tool checks, missing/unexpected files, unresolved facts, operations not performed, and submission_ready=false. Do not claim copied or staged because old COMPLETE.json exists. Treat missing facts as questions. File reports require a separate explicit request and a new approved workspace path; never write into the source, existing plan folders or staging metadata. Concrete skill improvement proposals must describe observed failure, impact, and a minimal fix. Use only the user-approved model; the bundled OpenCode profile uses local Qwen without external model fallback.
+
 ## Prerequisites
 
 Read `references/safety-policy.md`, `references/naming-policy.md` and
-`references/data-classification.md` before acting. Run `scripts/toolkit.py` in this skill;
+`references/data-classification.md` before acting. The remaining prerequisites and commands
+apply to explicitly requested staging only. Read-only inspection requires no new policy or reports.
+For staging, run `scripts/toolkit.py` in this skill;
 inside the full Git repository, `scripts/kbds.py` wraps the same implementation.
 Require Linux and Python 3.10+. Do not install software without authorization.
 
@@ -20,7 +26,7 @@ Require an approved local JSON policy with three disjoint absolute roots: source
 destination (new output) and workspace (new planning reports). Never substitute a similar
 path or add another volume. Use only the explicitly selected mode, not a folder-name guess.
 
-## Workflow
+## Staging workflow (opt-in)
 
 1. Inspect the scoped source with `inventory`. Report actual counts and errors. Unreadable
    paths, symlinks, nonregular files and sensitive names block completeness. Do not hide errors.
@@ -61,7 +67,7 @@ python3 scripts/toolkit.py --policy /approved/policy.local.json verify --plan /a
 Exit 2 means blocked/awaiting information, not permission to escalate. Exit 130 means interrupted.
 Do not replace a failed operation with raw shell copying or permission changes.
 
-## Deliverables and boundaries
+## Staging deliverables and boundaries
 
 Produce plan.json, inventory.tsv, file_mapping.tsv, sample_mapping.tsv, unresolved.tsv and
 excluded.tsv. Preserve evidence and decisions for a future metadata agent. Copy approved files

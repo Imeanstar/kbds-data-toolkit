@@ -26,7 +26,30 @@ Example request:
 References: https://developers.openai.com/codex/skills and
 https://developers.openai.com/codex/guides/agents-md (checked 2026-09-17).
 
-## Configure locally, never in public Git
+## OpenCode with local Qwen
+
+The new default workflow: install OpenCode, clone the repository, start the existing local llama-server, run OpenCode from the repository root, and ask it to load kbds-data-organizer. The bundled opencode.json defaults to kbds-review, local qwen3.8-27b at localhost:8080/v1, no external provider fallback, and no data writes or bash. Users provide the input path in chat. Configuration permissions can be changed by the account owner; do not call this immutable OS enforcement. Staging is an explicit later operation. Original metadata may reference a different machine, so never automatically replay old plans. No run-specific temporary state belongs in permanent instructions.
+
+With OpenCode installed and the local Qwen server running:
+
+```bash
+git clone https://github.com/Imeanstar/kbds-data-toolkit.git
+cd kbds-data-toolkit
+opencode
+```
+
+Example request:
+
+> Load kbds-data-organizer. Inspect only the file list and existing organization records
+> in the directory I provide. Do not create, modify, move, delete or organize files.
+> Explain the evidence and limitations in chat.
+
+Approve access only to the selected directory when OpenCode asks. Bash and edit tools
+remain denied. OpenCode stores its own sessions outside the dataset; chat-only means no
+new dataset or report files, not that the application has no internal state.
+The following policy, planning and copy commands are for explicitly requested staging only.
+
+## Configure locally for staging, never in public Git
 
 Use config/policy.example.json as the schema. Save your actual policy as the untracked
 config/policy.local.json. Set source_root, destination_root and workspace_root to approved,

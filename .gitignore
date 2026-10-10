@@ -12,6 +12,7 @@ id_ed25519*
 *.local.json
 *.local.yaml
 *.local.yml
+*.local.py
 work/
 reports/
 staging/
