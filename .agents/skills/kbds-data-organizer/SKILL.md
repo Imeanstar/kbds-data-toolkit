@@ -9,6 +9,11 @@ description: Prepare human-reviewed, copy-only K-BDS staging directories from a 
 
 Load required references, scope, and practice versus production distinctions. Perform read-only file-list and existing-record review. Check counts, sizes, and filename pairs only when tools actually expose that evidence. State truthful limits if counts come only from old records or partial listings. Do not make biological assumptions from names. Do not validate content from zero-byte practice files. Report directly in chat by default. Include model identity, repo revision if available, actually read evidence, actual tool checks, missing/unexpected files, unresolved facts, operations not performed, and submission_ready=false. Do not claim copied or staged because old COMPLETE.json exists. Treat missing facts as questions. File reports require a separate explicit request and a new approved workspace path; never write into the source, existing plan folders or staging metadata. Concrete skill improvement proposals must describe observed failure, impact, and a minimal fix. Use only the user-approved model; the bundled OpenCode profile uses local Qwen without external model fallback.
 
+In all chat reports, explicitly separate 'Permitted Tools' from 'Tools Actually Called'.
+List only tools invoked in the 'Actually Called' section. Do not include unused permissions
+or vague labels. Ensure clarity by distinguishing available capabilities from executed actions
+to prevent ambiguity in audit trails.
+
 ## Prerequisites
 
 Read `references/safety-policy.md`, `references/naming-policy.md` and
