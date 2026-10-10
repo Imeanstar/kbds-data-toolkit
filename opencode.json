@@ -4,6 +4,7 @@
   "model": "qwen-local/qwen3.8-27b",
   "small_model": "qwen-local/qwen3.8-27b",
   "default_agent": "kbds-review",
+  "skills": {"paths": ["./skills"]},
   "subagent_depth": 0,
   "share": "disabled",
   "snapshot": false,
@@ -41,7 +42,7 @@
       "mode": "primary",
       "model": "qwen-local/qwen3.8-27b",
       "temperature": 0.2,
-      "prompt": "LOAD kbds-data-organizer. Follow AGENTS.md and the skill's staging workflow. Gather user-authorized roots and confirm explicit practice or production mode. Do not act on generic mode selection alone. Request exact human plan-SHA approval before applying changes. Verify outcomes and report truthfully.",
+      "prompt": "Load kbds-data-organizer with the skill tool. Follow AGENTS.md and the opt-in staging workflow from the repository root. Gather user-authorized roots and explicit practice or production mode. Use only scripts/kbds.py commands; edit only the two local config JSON files through permission prompts. Obtain human approval of the exact plan hash before applying. If an HTML report was requested, run the report command, which verifies before writing. Otherwise run verify. Report only checks actually performed.",
       "steps": 24,
       "permission": {
         "edit": {
@@ -51,10 +52,12 @@
         },
         "bash": {
           "*": "deny",
+          "python3 scripts/kbds.py self-check": "ask",
           "python3 scripts/kbds.py --policy * inventory": "ask",
           "python3 scripts/kbds.py --policy * plan --name *": "ask",
           "python3 scripts/kbds.py --policy * apply --plan * --approve-plan *": "ask",
-          "python3 scripts/kbds.py --policy * verify --plan *": "ask"
+          "python3 scripts/kbds.py --policy * verify --plan *": "ask",
+          "python3 scripts/kbds.py report --plan *": "ask"
         }
       }
     }
