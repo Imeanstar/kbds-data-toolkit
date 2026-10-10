@@ -42,6 +42,13 @@ or bulk/single-cell facts from names alone. Ask for evidence or explicitly appro
 practice labels, clearly marked as unverified biologically. Confirm pairing and Sample/Experiment/
 Run rules as needed. Ask only unresolved questions; do not re-ask already confirmed practice mode.
 
+For thousands of legacy KRA practice paths, use the optional `practice_rule` documented in
+naming-policy.md instead of generating thousands of per-file JSON entries. Every rule field
+needs explicit fictional practice confirmation; ask only missing details. The discovery hash
+locks scope and is not copy approval. Use a NEW plan name with --decisions and wait for approval
+of the resulting resolved plan hash. Unknown paths remain unresolved. Terminal copy progress
+is sampled to about twenty updates; the package still records every copied file in events.jsonl.
+
 ## Opt-in: staging on the Linux data host
 
 Require an explicit staging request, Linux, Python 3.10+, source read permission and permission

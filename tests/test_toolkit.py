@@ -1,6 +1,7 @@
 """Synthetic data only. No network, live SSH server or research records."""
 import argparse
 import contextlib
+import copy
 import gzip
 import importlib.util
 import io
@@ -45,6 +46,60 @@ class InventorySummaryTests(unittest.TestCase):
         self.assertLess(len(json.dumps(result)), 1500)
         self.assertNotIn("action", json.dumps(result))
         self.assertEqual(t.inventory_summary([])["classification_candidates"], [])
+
+
+class PracticeRuleTests(unittest.TestCase):
+    def setUp(self):
+        self.policy = {"version": 1, "mode": "practice", "layout_version": 2, "repository_scope": "KRA",
+                       "source_root": "/srv/Example", "destination_root": "/srv/Example_KRA_makeup",
+                       "workspace_root": "/srv/work", "allow_practice_zero_bytes": True, "reserve_bytes": 0}
+        self.records = [{"source_relative": f"KRA/Study01/ID001_X/Library_WES/Run01/synthetic_{mate}.fastq.gz",
+                         "size": 0, "kind": "raw_fastq_candidate"} for mate in (1, 2)]
+        self.records.append({"source_relative": "metadata/old.json", "size": 7, "kind": "metadata_candidate"})
+        self.scope = {"policy": self.policy, "inventory": copy.deepcopy(self.records), "errors": []}
+        self.scope["plan_sha256"] = t.digest(self.scope)
+        self.rule = {"kind": "legacy_kra_bdr", "source_plan": "/srv/work/discovery/plan.json",
+                     "source_plan_sha256": self.scope["plan_sha256"], "fictional_confirmed": True,
+                     "sample_suffix_groups": {"_X": "B"}, "layout": "PAIRED", "modality": "bulk",
+                     "reason": "Confirmed synthetic practice rule", "evidence": "Synthetic user confirmation",
+                     "modality_evidence": "Synthetic bulk approval", "exclude_metadata_reason": "Confirmed exclusion"}
+
+    def expand(self, rule=None, records=None):
+        with mock.patch.object(t, "load_json", return_value=self.scope):
+            return t.expand_practice_rule(self.policy, self.records if records is None else records,
+                {"files": {}, "practice_rule": self.rule if rule is None else rule})["files"]
+
+    def test_expands_only_confirmed_fictional_labels_and_exclusions(self):
+        files = self.expand()
+        rows = []
+        for record in self.records[:2]:
+            row = {**record, **files[record["source_relative"]]}
+            self.assertEqual((row["sample_group"], row["sample"], row["specimen"], row["assay"]),
+                             ("B", "ID001", "ID001_X", "WES"))
+            self.assertTrue(row["evidence"].startswith("Fictional practice labels only"))
+            row["destination_relative"] = t.target_path(row, self.policy)
+            rows.append(row)
+        self.assertEqual([row["file_role"] for row in rows], ["R1", "R2"])
+        t.validate_rows(rows, "practice", self.policy)
+        self.assertEqual(files["metadata/old.json"]["action"], "exclude")
+
+    def test_new_files_hash_mismatch_and_outside_scope_are_blocked(self):
+        with self.assertRaises(t.Blocked):
+            self.expand(records=self.records + [{"source_relative": "metadata/new.json", "size": 1}])
+        for key, value in (("source_plan_sha256", "0" * 64), ("source_plan", "/srv/Example/plan.json"),
+                           ("fictional_confirmed", False), ("modality", "unknown")):
+            with self.subTest(key=key), self.assertRaises(t.Blocked):
+                self.expand(rule={**self.rule, key: value})
+
+    def test_unknown_and_overlapping_suffixes_are_not_assigned(self):
+        for groups in ({"_Y": "B"}, {"_X": "B", "X": "D"}):
+            self.assertEqual(set(self.expand(rule={**self.rule, "sample_suffix_groups": groups})),
+                             {"metadata/old.json"})
+
+    def test_production_blocks_before_inventory(self):
+        with mock.patch.object(t, "inventory") as scan, self.assertRaises(t.Blocked):
+            t.make_plan({**self.policy, "mode": "production"}, {"files": {}, "practice_rule": self.rule}, "blocked")
+        scan.assert_not_called()
 
 
 @unittest.skipUnless(t.FILESYSTEM_SUPPORTED, "Linux no-follow filesystem integration required")
@@ -507,6 +562,39 @@ class ToolkitTests(unittest.TestCase):
         self.assertEqual(summary["excluded_files"], 0)
         self.assertEqual(summary["unresolved_items"], 0)
         self.assertFalse(self.dest.exists())
+
+    def test_practice_rule_plan_and_large_copy_keep_full_events_but_bound_terminal_output(self):
+        self.dest = self.base / "source_KRA_makeup"
+        self.policy.update(layout_version=2, repository_scope="KRA", destination_root=str(self.dest))
+        for index in range(64):
+            run = self.src / f"KRA/Study01/ID001_X/Library_WES/Run{index:03d}"
+            run.mkdir(parents=True)
+            for mate in (1, 2):
+                (run / f"synthetic_{mate}.fastq.gz").touch()
+        (self.src / "metadata").mkdir()
+        (self.src / "metadata/old.json").write_text("synthetic")
+        scope = t.make_plan(self.policy, {"files": {}}, "rule-scope")
+        rule = {
+            "kind": "legacy_kra_bdr", "source_plan": str(self.base / "work/rule-scope/plan.json"),
+            "source_plan_sha256": scope["plan_sha256"], "fictional_confirmed": True,
+            "sample_suffix_groups": {"_X": "B"}, "layout": "PAIRED", "modality": "bulk",
+            "reason": "Confirmed synthetic rule", "evidence": "Synthetic confirmation",
+            "modality_evidence": "Synthetic bulk approval", "exclude_metadata_reason": "Confirmed synthetic exclusion"}
+        explicit = {name: {"action": "exclude", "reason": "Separate synthetic root fixtures"}
+                    for name in self.decisions["files"]}
+        plan = t.make_plan(self.policy, {"files": explicit, "practice_rule": rule}, "rule-ready")
+        self.assertEqual((plan["status"], len(plan["files"]), len(plan["excluded"])),
+                         ("READY_FOR_APPROVAL", 128, 3))
+        self.assertEqual(plan["practice_rule"], rule)
+        terminal = io.StringIO()
+        with contextlib.redirect_stderr(terminal):
+            t.apply(self.policy, plan, plan["plan_sha256"])
+        events = [json.loads(line) for line in terminal.getvalue().splitlines()]
+        progress = [event for event in events if event["event"] == "COPIED"]
+        self.assertLessEqual(len(progress), 22)
+        self.assertEqual((progress[0]["index"], progress[-1]["index"]), (1, 128))
+        self.assertEqual(len((self.dest / "metadata/events.jsonl").read_text().splitlines()), 128)
+        t.verify(self.policy, plan)
 
     def test_cli_verify_does_not_claim_to_repeat_fastq_checks(self):
         self.production()

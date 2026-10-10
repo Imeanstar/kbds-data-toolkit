@@ -398,12 +398,75 @@ def tsv_bytes(rows, columns):
     return stream.getvalue().encode()
 
 
+def expand_practice_rule(policy, records, decisions):
+    """Expand an explicitly confirmed fictional rule within one unchanged discovery scope."""
+    rule = decisions["practice_rule"]
+    require(policy["mode"] == "practice" and policy.get("layout_version") == 2 and
+            policy.get("repository_scope") == "KRA", "Practice rules require layout-2 KRA practice mode")
+    require(isinstance(rule, dict) and set(rule) == {
+        "kind", "source_plan", "source_plan_sha256", "fictional_confirmed", "sample_suffix_groups",
+        "layout", "modality", "reason", "evidence", "modality_evidence", "exclude_metadata_reason"},
+        "Practice rule has missing or unknown fields")
+    require(rule["kind"] == "legacy_kra_bdr" and rule["fictional_confirmed"] is True,
+            "Only explicitly confirmed fictional legacy KRA rules are supported")
+    require(rule["layout"] in ("PAIRED", "SINGLE") and rule["modality"] in ("bulk", "single_cell"),
+            "Confirm fictional layout and modality; no defaults")
+    for key in ("reason", "evidence", "modality_evidence", "exclude_metadata_reason"):
+        require(isinstance(rule[key], str) and rule[key].strip(), "Missing confirmed rule " + key)
+    groups = rule["sample_suffix_groups"]
+    require(isinstance(groups, dict) and groups and all(
+        isinstance(suffix, str) and 0 < len(suffix) <= 128 and group in ("B", "D", "R")
+        for suffix, group in groups.items()), "Confirm exact sample suffix to B/D/R rules")
+    path = absolute(rule["source_plan"])
+    require(path.startswith(policy["workspace_root"] + "/"), "Rule scope plan must be in the configured workspace")
+    scope = load_json(path)
+    require(scope["plan_sha256"] == rule["source_plan_sha256"] ==
+            digest({key: value for key, value in scope.items() if key != "plan_sha256"}), "Rule scope hash mismatch")
+    require(scope["policy"] == policy and scope["inventory"] == records and not scope["errors"],
+            "Rule scope changed or incomplete; obtain a new discovery scope and confirmation")
+    result = dict(decisions["files"])
+    for row in records:
+        rel = row["source_relative"]
+        if rel in result:
+            continue
+        segments = parts(rel)
+        if segments[0] == "metadata" and row["kind"] == "metadata_candidate":
+            result[rel] = {"action": "exclude", "reason": rule["exclude_metadata_reason"]}
+            continue
+        if len(segments) != 6 or segments[0] != "KRA" or row["kind"] != "raw_fastq_candidate" or row["size"] != 0:
+            continue
+        _, study, old_sample, experiment, run, filename = segments
+        matches = [(suffix, group) for suffix, group in groups.items() if old_sample.endswith(suffix)]
+        if len(matches) != 1 or "_" not in experiment:
+            continue
+        suffix, group = matches[0]
+        try:
+            role = "R" + pair_key(rel)[1] if rule["layout"] == "PAIRED" else "single"
+        except Blocked:
+            continue
+        result[rel] = {"action": "include", "repository": "KRA", "study": study,
+            "sample_group": group, "sample": old_sample[:-len(suffix)], "specimen": old_sample,
+            "assay": experiment.rsplit("_", 1)[1], "experiment": experiment, "run": run,
+            "layout": rule["layout"], "modality": rule["modality"], "file_role": role,
+            "raw_confirmed": True, "data_role": "raw_reads", "reason": rule["reason"],
+            "evidence": "Fictional practice labels only; " + rule["evidence"],
+            "modality_evidence": "Fictional practice labels only; " + rule["modality_evidence"]}
+    return {"files": result}
+
+
 def make_plan(policy, decisions, name):
     label(name)
     validate_layout_policy(policy)
-    require(isinstance(decisions, dict) and set(decisions) == {"files"}, "Decisions require a files mapping")
+    require(isinstance(decisions, dict) and {"files"} <= set(decisions) <= {"files", "practice_rule"},
+            "Decisions require files and an optional practice_rule")
     require(isinstance(decisions["files"], dict), "files must map exact source-relative paths to decisions")
+    if "practice_rule" in decisions:
+        require(policy["mode"] == "practice", "Practice rules cannot be used in production")
     records, errors = inventory(policy)
+    practice_rule = decisions.get("practice_rule")
+    if "practice_rule" in decisions:
+        require(not errors, "Practice rule inventory is incomplete")
+        decisions = expand_practice_rule(policy, records, decisions)
     rows, excluded, unresolved = [], [], []
     known = {r["source_relative"] for r in records}
     for key in sorted(set(decisions["files"]) - known):
@@ -441,6 +504,8 @@ def make_plan(policy, decisions, name):
             "excluded": excluded, "unresolved": unresolved, "errors": errors,
             "status": "READY_FOR_APPROVAL" if not unresolved and not errors and rows else "WAITING_FOR_USER",
             "submission_ready": False, "content_validation": "not_yet_run"}
+    if practice_rule is not None:
+        plan["practice_rule"] = practice_rule
     plan["plan_sha256"] = digest(plan)
     with directory(policy["workspace_root"], create=True) as work:
         os.mkdir(name, 0o700, dir_fd=work)
@@ -526,6 +591,10 @@ def plan_summary(plan):
             "errors_preview": [error[:512] for error in plan["errors"][:10]],
             "unresolved_preview": [{key: item[key][:512] for key in ("source_relative", "reason")}
                                    for item in plan["unresolved"][:10]],
+            "practice_rule": {key: plan["practice_rule"][key] for key in
+                              ("kind", "source_plan", "source_plan_sha256", "fictional_confirmed",
+                               "sample_suffix_groups", "layout", "modality")}
+                             if "practice_rule" in plan else None,
             "submission_ready": False}
 
 
@@ -680,7 +749,9 @@ def apply(policy, plan, approval):
                     log.write((json.dumps(entry) + "\n").encode())
                     log.flush()
                     os.fsync(log.fileno())
-                    event("COPIED", index=index, total=len(plan["files"]))
+                    # Keep full events in the package; bound terminal output for small model contexts.
+                    if index == 1 or index == len(plan["files"]) or index % max(1, (len(plan["files"]) + 19) // 20) == 0:
+                        event("COPIED", index=index, total=len(plan["files"]))
                 verify(policy, plan, require_complete=False)
                 write_new(dest, "metadata/COMPLETE.json", json_bytes(completion_record(plan)))
         event("COMPLETE", destination=str(path), submission_ready=False)

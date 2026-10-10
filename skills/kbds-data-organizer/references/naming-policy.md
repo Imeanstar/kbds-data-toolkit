@@ -80,6 +80,47 @@ For GEO use roles such as expression_matrix, matrix_barcodes and matrix_features
 Unknowns are questions, not defaults. A user's practice-only assumptions are not permanent
 classification rules. General B/D/R mappings are deliberately not supplied by the toolkit.
 
+## Large legacy KRA practice scopes
+
+For a large practice inventory already shaped as
+`KRA/<study>/<old_sample>/<experiment>/<run>/<filename>`, an optional `practice_rule`
+avoids writing thousands of JSON entries through model context. It is forbidden in production.
+The user must explicitly confirm the fictional rule, suffix groups, modality, read layout and
+metadata exclusion. Do not supply defaults or treat this confirmation as biological evidence.
+
+This rule uses the study/experiment/run folder labels, strips the confirmed suffix from
+old_sample to obtain sample, retains old_sample as the fictional specimen label, and takes
+the last underscore segment of experiment as the fictional assay label. PAIRED file roles
+come from supported mate suffixes; SINGLE uses single. Unknown/ambiguous layouts remain
+unresolved. Explicit per-file entries may handle separately confirmed exceptions.
+
+The source_plan must be a complete discovery plan inside workspace_root with the same policy.
+Its full hash and inventory signatures lock the scope. Changed or added files block expansion;
+obtain a new discovery scope and rule confirmation. Metadata exclusion applies only to
+metadata candidates under metadata/ in that locked scope. Expanded decisions and the rule
+are retained in the NEW plan; its full hash still needs separate human copy approval.
+
+Synthetic shape only; use actual authorized absolute paths and confirmed values:
+
+```json
+{
+  "files": {},
+  "practice_rule": {
+    "kind": "legacy_kra_bdr",
+    "source_plan": "/approved/work/discovery/plan.json",
+    "source_plan_sha256": "REPLACE_WITH_FULL_DISCOVERY_HASH",
+    "fictional_confirmed": true,
+    "sample_suffix_groups": {"_X": "B", "_Y": "D", "_Z": "R"},
+    "layout": "PAIRED",
+    "modality": "bulk",
+    "reason": "Explicit fictional practice rule approval",
+    "evidence": "Record the user's exact scoped rule confirmation",
+    "modality_evidence": "Record explicit fictional bulk approval",
+    "exclude_metadata_reason": "Record explicit exclusion of existing metadata records"
+  }
+}
+```
+
 ## Compatibility and collisions
 
 Labels use 1–128 ASCII letters/digits/underscore/hyphen/dot, starting alphanumeric.
