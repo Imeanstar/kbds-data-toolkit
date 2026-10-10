@@ -35,6 +35,13 @@ Native grep is denied in both modes. For authorized staging, run inventory --sum
 
 Describe permissions truthfully: review allows read/glob/skill/question; stage adds bash only for bundled toolkit commands and edit/write only for two config/*.local.json files with permission. Native grep, external models, and subagents are denied. Separate conditional tool permission from completed calls. Use full absolute approved roots and the full plan SHA in approval requests, no ellipses. Never invent repo revision or human approval.
 
+Question choices must obey the active policy and repository rules. In practice mode, nonzero
+existing records cannot be included as empty KRA reads: ask for explicit exclusion or stop,
+never recommend including everything or switch modes to make it fit. Do not recommend tissue
+or bulk/single-cell facts from names alone. Ask for evidence or explicitly approved fictional
+practice labels, clearly marked as unverified biologically. Confirm pairing and Sample/Experiment/
+Run rules as needed. Ask only unresolved questions; do not re-ask already confirmed practice mode.
+
 ## Opt-in: staging on the Linux data host
 
 Require an explicit staging request, Linux, Python 3.10+, source read permission and permission
