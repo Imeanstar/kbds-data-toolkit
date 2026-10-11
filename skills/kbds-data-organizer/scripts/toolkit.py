@@ -201,7 +201,7 @@ def validate_layout_policy(policy):
     source, destination = (PurePosixPath(absolute(policy[k])) for k in ("source_root", "destination_root"))
     require(destination.parent == source.parent, "Makeup output must be a sibling of its source")
     require(destination.name in (source.name + "_makeup", source.name + "_" + scope + "_makeup"),
-            "Use <source>_makeup or <source>_<repository>_makeup")
+            "destination_root basename must be <source>_makeup or <source>_<repository>_makeup; changing --name does not fix the output path")
 
 
 def classify(path):
