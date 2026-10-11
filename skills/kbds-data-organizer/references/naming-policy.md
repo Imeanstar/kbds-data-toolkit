@@ -105,6 +105,9 @@ Do not copy policy keys version/layout_version or invent *_pattern fields. Use l
 not read_layout. On a schema error, correct the listed keys before generating another plan;
 do not repeat the same command or reload all references.
 sample_suffix_groups is a JSON object mapping suffix strings to B/D/R strings, not an array.
+Its suffixes match the old_sample folder in the third path segment, not FASTQ filenames.
+Check the actual folder labels before requesting confirmation; do not repeat a confirmed
+inclusion decision when the missing item is a folder naming rule.
 
 Synthetic shape only; use actual authorized absolute paths and confirmed values:
 

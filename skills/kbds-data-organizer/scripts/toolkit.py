@@ -478,7 +478,10 @@ def make_plan(policy, decisions, name):
         rel = record["source_relative"]
         decision = decisions["files"].get(rel)
         try:
-            require(isinstance(decision, dict), "Needs user decision: include/exclude and rationale")
+            require(isinstance(decision, dict),
+                    "Not matched by practice_rule: check legacy path shape, the confirmed old_sample folder "
+                    "suffix (third path segment), and read-pair suffix; FASTQ sample labels are not folder matches"
+                    if practice_rule is not None else "Needs user decision: include/exclude and rationale")
             require(set(decision) <= {"action", "reason", "evidence", "repository", "study", "sample",
                                       "experiment", "run", "layout", "raw_confirmed", "sample_group",
                                       "specimen", "assay", "modality", "modality_evidence", "file_role",

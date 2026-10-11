@@ -606,6 +606,7 @@ class ToolkitTests(unittest.TestCase):
         summary = json.loads(result.stdout)
         self.assertEqual((summary["status"], summary["included_files"], summary["excluded_files"],
                           summary["unresolved_items"]), ("WAITING_FOR_USER", 128, 1, 2))
+        self.assertTrue(all("old_sample folder" in item["reason"] for item in summary["unresolved_preview"]))
         terminal = io.StringIO()
         with contextlib.redirect_stderr(terminal):
             t.apply(self.policy, plan, plan["plan_sha256"])

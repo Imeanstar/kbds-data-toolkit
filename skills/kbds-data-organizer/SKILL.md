@@ -45,7 +45,11 @@ Run rules as needed. Ask only unresolved questions; do not re-ask already confir
 For thousands of legacy KRA practice paths, use the optional `practice_rule` documented in
 naming-policy.md instead of generating thousands of per-file JSON entries. Every rule field
 needs explicit fictional practice confirmation; ask only missing details. The discovery hash
-locks scope and is not copy approval. Use a NEW plan name with --decisions and wait for approval
+locks scope and is not copy approval.
+The suffix mapping matches old_sample folder names (third relative-path segment), not filenames.
+Compare actual inventory examples before asking for a rule; unmatched paths need a rule or
+exception decision, not a repeat of already confirmed practice inclusion.
+Use a NEW plan name with --decisions and wait for approval
 of the resulting resolved plan hash. Unknown paths remain unresolved. Terminal copy progress
 is sampled to about twenty updates; the package still records every copied file in events.jsonl.
 
