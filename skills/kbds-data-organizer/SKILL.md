@@ -87,6 +87,10 @@ stop; do not use real data or elevate privileges to make the check pass.
    Ask for approval of **that plan** before any copy. If the plan or source changes, make a
    new plan and obtain new approval. Do not treat possession of the hash as human approval.
 3. Only after approval, run `python3 scripts/kbds.py --policy /absolute/repo/config/policy.local.json apply --plan /private/work/NEW_NAME/plan.json --approve-plan APPROVED_SHA256`.
+   Set the native bash tool's `timeout` explicitly: at least 600000 milliseconds for practice
+   copies, and longer when the expected job requires it. Also budget verification/report time.
+   The default 120000 milliseconds can interrupt a valid copy on slow storage. A timeout is
+   a failure, not completion; do not retry apply against the existing partial destination.
    Never move, delete, overwrite, merge or automatically resume. Preserve and report partial
    output on failure. No archive submission is part of this job.
 4. If an HTML report was requested for this workspace, run
