@@ -12,6 +12,12 @@ free-space check, file hashes and supported KRA FASTQ validation. Original names
 No delete, move, chmod, chown, sudo, hardlink, compression, deduplication or automatic cleanup.
 Reading can update filesystem access times. Partial output remains after failure.
 
+Verification compares the staged plan and TSV bytes with their approved-plan serialization,
+checks copy events in order, and validates every completion field. Production without KRA
+records checksum validation only. Filesystem helpers reject sensitive path components before
+opening data or control files, including when .aws is selected as a root.
+OpenCode denies native grep because its regex permission does not enforce read-path rules.
+
 ## Human approval is not independently enforced
 
 The --approve-plan flag binds execution to a particular plan, but a model with unrestricted

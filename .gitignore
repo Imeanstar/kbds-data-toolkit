@@ -12,6 +12,9 @@ id_ed25519*
 *.local.json
 *.local.yaml
 *.local.yml
+*.local.py
+local_reports/
+.kbds-ssh-bridge/
 work/
 reports/
 staging/
