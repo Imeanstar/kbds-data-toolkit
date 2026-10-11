@@ -52,6 +52,8 @@ exception decision, not a repeat of already confirmed practice inclusion.
 Use a NEW plan name with --decisions and wait for approval
 of the resulting resolved plan hash. Unknown paths remain unresolved. Terminal copy progress
 is sampled to about twenty updates; the package still records every copied file in events.jsonl.
+Use `plan_sha256` directly from plan stdout for scope locks and copy approval. It hashes the
+canonical plan, not the bytes of plan.json; do not run sha256sum or a Python hash command.
 
 ## Opt-in: staging on the Linux data host
 
