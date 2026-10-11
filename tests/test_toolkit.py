@@ -92,6 +92,7 @@ class PracticeRuleTests(unittest.TestCase):
             with self.assertRaisesRegex(t.Blocked, "Practice rule keys must be exactly"):
                 self.expand(rule=rule)
         for key, value in (("source_plan_sha256", "0" * 64), ("source_plan", "/srv/Example/plan.json"),
+                           ("sample_suffix_groups", [{"suffix": "_X", "branch": "B"}]),
                            ("fictional_confirmed", False), ("modality", "unknown")):
             with self.subTest(key=key), self.assertRaises(t.Blocked):
                 self.expand(rule={**self.rule, key: value})

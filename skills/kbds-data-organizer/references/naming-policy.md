@@ -104,6 +104,7 @@ The decisions object has only files and practice_rule. files:{} is valid with th
 Do not copy policy keys version/layout_version or invent *_pattern fields. Use layout,
 not read_layout. On a schema error, correct the listed keys before generating another plan;
 do not repeat the same command or reload all references.
+sample_suffix_groups is a JSON object mapping suffix strings to B/D/R strings, not an array.
 
 Synthetic shape only; use actual authorized absolute paths and confirmed values:
 

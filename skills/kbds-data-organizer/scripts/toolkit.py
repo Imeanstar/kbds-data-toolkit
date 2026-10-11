@@ -417,7 +417,8 @@ def expand_practice_rule(policy, records, decisions):
     groups = rule["sample_suffix_groups"]
     require(isinstance(groups, dict) and groups and all(
         isinstance(suffix, str) and 0 < len(suffix) <= 128 and group in ("B", "D", "R")
-        for suffix, group in groups.items()), "Confirm exact sample suffix to B/D/R rules")
+        for suffix, group in groups.items()), "sample_suffix_groups must be a non-empty JSON object "
+        "mapping suffix strings to B/D/R strings; not a list of suffix/branch objects")
     path = absolute(rule["source_plan"])
     require(path.startswith(policy["workspace_root"] + "/"), "Rule scope plan must be in the configured workspace")
     scope = load_json(path)
