@@ -403,10 +403,11 @@ def expand_practice_rule(policy, records, decisions):
     rule = decisions["practice_rule"]
     require(policy["mode"] == "practice" and policy.get("layout_version") == 2 and
             policy.get("repository_scope") == "KRA", "Practice rules require layout-2 KRA practice mode")
-    require(isinstance(rule, dict) and set(rule) == {
+    rule_fields = {
         "kind", "source_plan", "source_plan_sha256", "fictional_confirmed", "sample_suffix_groups",
-        "layout", "modality", "reason", "evidence", "modality_evidence", "exclude_metadata_reason"},
-        "Practice rule has missing or unknown fields")
+        "layout", "modality", "reason", "evidence", "modality_evidence", "exclude_metadata_reason"}
+    require(isinstance(rule, dict) and set(rule) == rule_fields,
+        "Practice rule keys must be exactly: " + ", ".join(sorted(rule_fields)))
     require(rule["kind"] == "legacy_kra_bdr" and rule["fictional_confirmed"] is True,
             "Only explicitly confirmed fictional legacy KRA rules are supported")
     require(rule["layout"] in ("PAIRED", "SINGLE") and rule["modality"] in ("bulk", "single_cell"),
@@ -458,7 +459,8 @@ def make_plan(policy, decisions, name):
     label(name)
     validate_layout_policy(policy)
     require(isinstance(decisions, dict) and {"files"} <= set(decisions) <= {"files", "practice_rule"},
-            "Decisions require files and an optional practice_rule")
+            "Decisions top-level keys must be files and optional practice_rule only; files:{} is allowed. "
+            "Do not include policy keys such as version or layout_version")
     require(isinstance(decisions["files"], dict), "files must map exact source-relative paths to decisions")
     if "practice_rule" in decisions:
         require(policy["mode"] == "practice", "Practice rules cannot be used in production")

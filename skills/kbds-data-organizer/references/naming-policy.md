@@ -100,6 +100,11 @@ obtain a new discovery scope and rule confirmation. Metadata exclusion applies o
 metadata candidates under metadata/ in that locked scope. Expanded decisions and the rule
 are retained in the NEW plan; its full hash still needs separate human copy approval.
 
+The decisions object has only files and practice_rule. files:{} is valid with this rule.
+Do not copy policy keys version/layout_version or invent *_pattern fields. Use layout,
+not read_layout. On a schema error, correct the listed keys before generating another plan;
+do not repeat the same command or reload all references.
+
 Synthetic shape only; use actual authorized absolute paths and confirmed values:
 
 ```json

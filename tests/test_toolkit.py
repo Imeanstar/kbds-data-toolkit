@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -86,6 +87,10 @@ class PracticeRuleTests(unittest.TestCase):
     def test_new_files_hash_mismatch_and_outside_scope_are_blocked(self):
         with self.assertRaises(t.Blocked):
             self.expand(records=self.records + [{"source_relative": "metadata/new.json", "size": 1}])
+        for rule in ({key: value for key, value in self.rule.items() if key != "layout"},
+                     {**self.rule, "read_layout": "PAIRED"}):
+            with self.assertRaisesRegex(t.Blocked, "Practice rule keys must be exactly"):
+                self.expand(rule=rule)
         for key, value in (("source_plan_sha256", "0" * 64), ("source_plan", "/srv/Example/plan.json"),
                            ("fictional_confirmed", False), ("modality", "unknown")):
             with self.subTest(key=key), self.assertRaises(t.Blocked):
@@ -99,6 +104,11 @@ class PracticeRuleTests(unittest.TestCase):
     def test_production_blocks_before_inventory(self):
         with mock.patch.object(t, "inventory") as scan, self.assertRaises(t.Blocked):
             t.make_plan({**self.policy, "mode": "production"}, {"files": {}, "practice_rule": self.rule}, "blocked")
+        scan.assert_not_called()
+
+    def test_policy_keys_in_decisions_are_blocked_before_inventory(self):
+        with mock.patch.object(t, "inventory") as scan, self.assertRaisesRegex(t.Blocked, "files:{} is allowed"):
+            t.make_plan(self.policy, {"files": {}, "practice_rule": self.rule, "version": 1}, "blocked")
         scan.assert_not_called()
 
 
@@ -586,6 +596,15 @@ class ToolkitTests(unittest.TestCase):
         self.assertEqual((plan["status"], len(plan["files"]), len(plan["excluded"])),
                          ("READY_FOR_APPROVAL", 128, 3))
         self.assertEqual(plan["practice_rule"], rule)
+        policy_path, decisions_path = self.base / "policy.json", self.base / "decisions.json"
+        policy_path.write_text(json.dumps(self.policy))
+        decisions_path.write_text(json.dumps({"files": {}, "practice_rule": rule}))
+        result = subprocess.run([sys.executable, str(ROOT / "scripts/kbds.py"), "--policy", str(policy_path),
+            "plan", "--name", "rule-cli", "--decisions", str(decisions_path)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        summary = json.loads(result.stdout)
+        self.assertEqual((summary["status"], summary["included_files"], summary["excluded_files"],
+                          summary["unresolved_items"]), ("WAITING_FOR_USER", 128, 1, 2))
         terminal = io.StringIO()
         with contextlib.redirect_stderr(terminal):
             t.apply(self.policy, plan, plan["plan_sha256"])
