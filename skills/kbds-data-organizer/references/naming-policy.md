@@ -45,6 +45,10 @@ KRA path relative to its output:
 - `file_role`: R1/R2 for confirmed pairs, or single for SINGLE layout. The B/D/R label
   belongs to the Sample branch, not the file-role directory. Original filenames stay unchanged.
 
+For confirmed pairs, an explicit `_R1`/`_R2` marker takes priority over an optional numeric
+chunk suffix. Otherwise use the final `_1`/`_2` (or `-1`/`-2`), so `Sample_1_1` and
+`Sample_1_2` retain `Sample_1` as their common name. Filename parsing does not confirm biology.
+
 Other repositories use:
 `<output-name>_<modality>/<study>/<original_relative_path>`.
 Keep matrix.mtx, barcodes.tsv and features.tsv (or genes.tsv) together at their original
@@ -77,6 +81,9 @@ KEA alignment files additionally require `data_role: processed_functional_genomi
 the evidence must explain the experiment and intended KEA use, not merely the .bam suffix.
 For GEO use roles such as expression_matrix, matrix_barcodes and matrix_features.
 
+For confirmed recurring path patterns, `path_rules` can replace repetitive per-file decisions.
+See [scoped-execution.md](scoped-execution.md) for the full-match/named-capture schema.
+It is an alternative to `practice_rule`; explicit `files` entries override either rule format.
 Unknowns are questions, not defaults. A user's practice-only assumptions are not permanent
 classification rules. General B/D/R mappings are deliberately not supplied by the toolkit.
 
@@ -98,7 +105,7 @@ The source_plan must be a complete discovery plan inside workspace_root with the
 Its full hash and inventory signatures lock the scope. Changed or added files block expansion;
 obtain a new discovery scope and rule confirmation. Metadata exclusion applies only to
 metadata candidates under metadata/ in that locked scope. Expanded decisions and the rule
-are retained in the NEW plan; its full hash still needs separate human copy approval.
+are retained in the NEW plan; without an approved scope, its full hash needs human copy approval.
 
 The decisions object has only files and practice_rule. files:{} is valid with this rule.
 Do not copy policy keys version/layout_version or invent *_pattern fields. Use layout,

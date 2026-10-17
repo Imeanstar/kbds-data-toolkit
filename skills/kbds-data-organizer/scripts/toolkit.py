@@ -25,7 +25,8 @@ FILESYSTEM_SUPPORTED = sys.platform.startswith("linux")
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW if FILESYSTEM_SUPPORTED else None
 READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK if FILESYSTEM_SUPPORTED else None
 FASTQ = re.compile(r"\.(?:fastq|fq)(?:\.gz)?$", re.I)
-PAIR = re.compile(r"^(.*?)[_-]R?([12])(_[0-9]+)?(\.(?:fastq|fq)(?:\.gz)?)$", re.I)
+PAIR = re.compile(r"^(.*?)[_-]R([12])(_[0-9]+)?(\.(?:fastq|fq)(?:\.gz)?)$", re.I)
+NUMBERED_PAIR = re.compile(r"^(.*)[_-]([12])(_[0-9]+)?(\.(?:fastq|fq)(?:\.gz)?)$", re.I)
 REPOSITORIES = {"KRA", "KEA", "GEO", "KVar", "KNA", "review"}
 MAX_LINE = 16 * 1024 * 1024
 
@@ -282,9 +283,14 @@ def inventory(policy):
     return records, errors
 
 
+def pair_match(name):
+    # An explicit R marker takes priority; otherwise the final _1/_2 is the mate.
+    return PAIR.fullmatch(name) or NUMBERED_PAIR.fullmatch(name)
+
+
 def pair_key(path):
     p = PurePosixPath(path)
-    match = PAIR.fullmatch(p.name)
+    match = pair_match(p.name)
     require(match is not None, "Cannot parse mate suffix; no pairing inference allowed: " + path)
     stem, mate, chunk, extension = match.groups()
     return str(p.parent) + "/" + stem + (chunk or "") + extension.lower(), mate
@@ -456,17 +462,60 @@ def expand_practice_rule(policy, records, decisions):
     return {"files": result}
 
 
-def make_plan(policy, decisions, name):
+def expand_path_rules(records, decisions):
+    """Apply only supplied, unambiguous full-path rules; unknown files stay unresolved."""
+    rules = decisions["path_rules"]
+    require(isinstance(rules, list) and rules, "path_rules must be a nonempty list")
+    compiled = []
+    for rule in rules:
+        require(isinstance(rule, dict) and set(rule) == {"pattern", "decision"} and
+                isinstance(rule["pattern"], str) and isinstance(rule["decision"], dict),
+                "Each path rule needs pattern and decision")
+        try:
+            compiled.append((re.compile(rule["pattern"]), rule["decision"]))
+        except re.error as exc:
+            raise Blocked("Invalid path-rule pattern: " + str(exc)) from exc
+    result = dict(decisions["files"])
+    for row in records:
+        path = row["source_relative"]
+        if path in result:
+            continue
+        matches = [(pattern.fullmatch(path), decision) for pattern, decision in compiled]
+        matches = [(match, decision) for match, decision in matches if match is not None]
+        require(len(matches) <= 1, "Ambiguous path rules: " + path)
+        if not matches:
+            continue
+        match, template = matches[0]
+        decision = {}
+        for key, value in template.items():
+            if isinstance(value, str):
+                def substitute(token):
+                    captured = match.groupdict().get(token[1])
+                    require(captured is not None, "Unknown/unmatched path-rule capture: " + token[1])
+                    return captured
+                value = re.sub(r"\{([A-Za-z_]\w*)\}", substitute, value)
+                require("{" not in value and "}" not in value, "Only named captures are allowed in rule templates")
+            decision[key] = value
+        result[path] = decision
+    return {"files": result}
+
+
+def make_plan(policy, decisions, name, scope_sha256=None):
     label(name)
     validate_layout_policy(policy)
-    require(isinstance(decisions, dict) and {"files"} <= set(decisions) <= {"files", "practice_rule"},
-            "Decisions top-level keys must be files and optional practice_rule only; files:{} is allowed. "
+    require(isinstance(decisions, dict) and {"files"} <= set(decisions) <= {"files", "practice_rule", "path_rules"},
+            "Decisions top-level keys must be files and optional practice_rule or path_rules; files:{} is allowed. "
             "Do not include policy keys such as version or layout_version")
     require(isinstance(decisions["files"], dict), "files must map exact source-relative paths to decisions")
+    require(not ("practice_rule" in decisions and "path_rules" in decisions), "Use only one rule format")
     if "practice_rule" in decisions:
         require(policy["mode"] == "practice", "Practice rules cannot be used in production")
     records, errors = inventory(policy)
     practice_rule = decisions.get("practice_rule")
+    path_rules = decisions.get("path_rules")
+    if path_rules is not None:
+        require(not errors, "Path-rule inventory is incomplete")
+        decisions = expand_path_rules(records, decisions)
     if "practice_rule" in decisions:
         require(not errors, "Practice rule inventory is incomplete")
         decisions = expand_practice_rule(policy, records, decisions)
@@ -512,6 +561,10 @@ def make_plan(policy, decisions, name):
             "submission_ready": False, "content_validation": "not_yet_run"}
     if practice_rule is not None:
         plan["practice_rule"] = practice_rule
+    if path_rules is not None:
+        plan["path_rules"] = path_rules
+    if scope_sha256 is not None:
+        plan["approval_scope_sha256"] = scope_sha256
     plan["plan_sha256"] = digest(plan)
     with directory(policy["workspace_root"], create=True) as work:
         os.mkdir(name, 0o700, dir_fd=work)
@@ -569,7 +622,7 @@ def completion_record(plan):
 
 def inventory_summary(records):
     """Bounded filename candidates, never confirmed classifications or decisions."""
-    groups = {}
+    groups, directories = {}, {}
     for row in records:
         key = (row["kind"], row["repository_candidate"])
         group = groups.setdefault(key, {"kind": key[0], "repository_candidate": key[1],
@@ -581,10 +634,21 @@ def inventory_summary(records):
             path = row["source_relative"]
             group["examples"].append(path[:200])
             group["examples_truncated"] |= len(path) > 200
+        path = PurePosixPath(row["source_relative"])
+        folder = directories.setdefault(str(path.parent), {"files": 0, "name_role_counts": {}, "examples": {}})
+        folder["files"] += 1
+        match = pair_match(path.name) if FASTQ.search(path.name) else None
+        role = "R" + match[2] if match else "unparsed"
+        folder["name_role_counts"][role] = folder["name_role_counts"].get(role, 0) + 1
+        examples = folder["examples"].setdefault(role, [])
+        if len(examples) < 2:
+            examples.append(path.name[:200])
     empty = sum(row["size"] == 0 for row in records)
     return {"files": len(records), "bytes": sum(row["size"] for row in records),
             "zero_byte_files": empty, "nonzero_byte_files": len(records) - empty,
-            "classification_candidates": [groups[key] for key in sorted(groups)]}
+            "classification_candidates": [groups[key] for key in sorted(groups)],
+            "path_groups": [{"parent": parent[:200], **directories[parent]} for parent in sorted(directories)[:20]],
+            "path_groups_truncated": len(directories) > 20}
 
 
 def plan_summary(plan):

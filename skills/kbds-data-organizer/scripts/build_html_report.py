@@ -137,6 +137,9 @@ def plan_report_content(plan):
     ]
     if plan["policy"]["mode"] == "practice":
         results.append("연습 모드는 0바이트 자리표시자의 경로와 크기만 검사했습니다. 연습용 가정은 실데이터의 확인 사실이 아닙니다.")
+    if "approval_scope_sha256" in plan:
+        results.append("승인된 범위 정책으로 계획·복사·검증을 자동 실행했습니다. 범위 SHA-256: "
+                       + plan["approval_scope_sha256"] + ".")
     relationships.append("위 관계는 승인된 파일 매핑의 구조입니다. 같은 ID의 생물학적 관계는 별도 근거 없이 확정하지 않았습니다.")
     data = {"title": f"{Path(plan['policy']['source_root']).name} 데이터 정리 보고서",
             "source_path": plan["policy"]["source_root"],

@@ -10,7 +10,7 @@ Default inspection is read-only. Native read, glob, and skill tools are allowed.
 ## Agent Roles
 
 - **kbds-review**: Default read-only agent. Inspects state without modifying files.
-- **kbds-stage**: Opt-in primary agent. Plans, copies, verifies and creates the requested HTML report. OpenCode prompts for permitted commands and control-file edits. Copying additionally requires human approval of the exact plan hash. Never auto-resumes partial copies. Symlink roots require approved canonical paths. No external delegation or model-based approvals.
+- **kbds-stage**: Opt-in primary agent. Plans, copies, verifies and creates the requested HTML report. OpenCode prompts for permitted commands and control-file edits. Use either human approval of an exact plan or the user's previously approved scoped policy via `run`. Never auto-resumes partial copies. Symlink roots require approved canonical paths. No external delegation or model-based approvals.
 
 ## Shared task constraints
 
@@ -21,11 +21,13 @@ Default inspection is read-only. Native read, glob, and skill tools are allowed.
 - Never infer biological specimen identity, tissue, treatment, library identity or Run/BioSample
   relationships from names alone. Record candidates, ask material questions, and wait.
 - For staging, require an explicit local policy and use the repository's inventory/plan/apply/verify,
-  report and synthetic self-check commands. Never
+  report, scoped run and synthetic self-check commands. Never
   patch a safeguard, escalate privileges or install packages to circumvent a blocked command.
-- A classification decision is not execution approval. Present all mappings, exclusions,
-  unresolved items, source/destination, mode, file count, bytes and plan SHA-256; wait for
-  human approval of that exact plan. Do not invent approval or answer on the user's behalf.
+- A classification decision is not execution approval. Without an approved scope, present
+  mappings, exclusions, roots, mode, counts, bytes and plan SHA-256 and wait for exact-plan
+  approval. With an approved scope, use the bundled `run` command; it makes a fresh plan,
+  checks the approved policy/rules and stops on exceptions before copying. Do not request
+  approval again for a matching plan. Never invent scope approval or broaden its rules.
 - Do not read credentials or unrelated paths. Never disable SSH host-key checks or use sudo.
 - Report incomplete inventory and failed/disconnected copies truthfully. Retain partial output.
   Never auto-cleanup, merge into an existing destination or resume writes without a new plan.

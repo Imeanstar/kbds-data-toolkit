@@ -65,6 +65,8 @@ class OpenCodeProfileTest(unittest.TestCase):
             "python3 scripts/kbds.py --policy /approved/policy.local.json apply --plan /approved/work/reviewed-001/plan.json --approve-plan PLAN_HASH",
             "python3 scripts/kbds.py --policy /approved/policy.local.json verify --plan /approved/work/reviewed-001/plan.json",
             "python3 scripts/kbds.py report --plan /approved/work/reviewed-001/plan.json",
+            "python3 scripts/kbds.py run --scope /approved/scope.local.json --inspect",
+            "python3 scripts/kbds.py run --scope /approved/scope.local.json --approve-scope SCOPE_HASH --name job-001",
         ):
             self.assertEqual(action("bash", command), "ask")
         for command in ("rm -rf /data", "cp -r /source /destination", "python3 -c 'print(1)'",
@@ -73,7 +75,7 @@ class OpenCodeProfileTest(unittest.TestCase):
             self.assertEqual(action("bash", command), "deny")
         for file in ("config/policy.local.json", "config/decisions.local.json"):
             self.assertEqual(action("edit", file), "ask")
-        for file in ("opencode.json", "AGENTS.md", "scripts/kbds.py", "source/sample_R1.fastq.gz",
+        for file in ("opencode.json", "AGENTS.md", "scripts/kbds.py", "config/scope.local.json", "source/sample_R1.fastq.gz",
                      "../source/sample_R1.fastq.gz", "skills/kbds-data-organizer/scripts/toolkit.py"):
             self.assertEqual(action("edit", file), "deny")
         self.assertEqual(set(stage["permission"]["edit"]),

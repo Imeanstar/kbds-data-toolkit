@@ -15,6 +15,9 @@ if __name__ == "__main__":
     elif command == ["report"]:
         script = scripts / "build_html_report.py"
         sys.argv.pop(1)
+    elif command == ["run"]:
+        script = scripts / "run_scope.py"
+        sys.argv.pop(1)
     else:
         script = scripts / "toolkit.py"
     sys.path.insert(0, str(scripts))
