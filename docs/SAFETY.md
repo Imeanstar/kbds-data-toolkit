@@ -12,9 +12,19 @@ free-space check, file hashes and supported KRA FASTQ validation. Original names
 No delete, move, chmod, chown, sudo, hardlink, compression, deduplication or automatic cleanup.
 Reading can update filesystem access times. Partial output remains after failure.
 
+Verification compares the staged plan and TSV bytes with their approved-plan serialization,
+checks copy events in order, and validates every completion field. Production without KRA
+records checksum validation only. Filesystem helpers reject sensitive path components before
+opening data or control files, including when .aws is selected as a root.
+OpenCode denies native grep because its regex permission does not enforce read-path rules.
+
 ## Human approval is not independently enforced
 
-The --approve-plan flag binds execution to a particular plan, but a model with unrestricted
+The --approve-plan flag binds execution to a particular plan. The optional scoped `run`
+command binds exact policy and classification decisions to --approve-scope and automatically
+generates/executes matching plans. Unknown files and other validation errors still stop the job.
+The model cannot edit the scope file through the bundled profile. This is not independent
+authentication: a model with unrestricted
 shell access can supply that hash. AGENTS.md forbids inventing approval; a prompt is not a hard
 security boundary. The independently authenticated human gateway is NOT implemented in v0.1.
 Do not describe this prototype as guaranteeing that a misbehaving model cannot bypass approval.

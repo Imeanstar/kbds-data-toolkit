@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "policy": {
+    "version": 1,
+    "layout_version": 2,
+    "repository_scope": "KRA",
+    "mode": "practice",
+    "source_root": "/srv/kbds-practice/raw/ExampleStudy",
+    "destination_root": "/srv/kbds-practice/raw/ExampleStudy_makeup",
+    "workspace_root": "/srv/kbds-practice/work/job-001",
+    "allow_practice_zero_bytes": true,
+    "reserve_bytes": 104857600
+  },
+  "decisions": {
+    "files": {},
+    "path_rules": [
+      {
+        "pattern": "reads/(?P<sample>Sample[0-9]+)_R(?P<mate>[12])\\.fastq\\.gz",
+        "decision": {
+          "action": "include",
+          "reason": "Synthetic practice example only; replace with approved rules",
+          "evidence": "Fictional labels; not biological evidence",
+          "repository": "KRA",
+          "study": "ExampleStudy",
+          "sample_group": "R",
+          "sample": "{sample}",
+          "specimen": "{sample}",
+          "assay": "ExampleAssay",
+          "experiment": "{sample}_Library",
+          "run": "{sample}_Run",
+          "layout": "PAIRED",
+          "raw_confirmed": true,
+          "modality": "bulk",
+          "modality_evidence": "Fictional practice modality only",
+          "file_role": "R{mate}",
+          "data_role": "raw_reads"
+        }
+      }
+    ]
+  }
+}
