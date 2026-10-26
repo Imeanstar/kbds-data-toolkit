@@ -17,7 +17,8 @@ class BridgeSafetyTests(unittest.TestCase):
         self.root = Path(self.temp.name)
 
     def make_bridge(self):
-        root = self.root / "bridge"
+        # Match run_bridge: normalize Windows TEMP aliases before creating state.
+        root = remote.state_root(self.root / "bridge")
         root.mkdir()
         (root / "requests").mkdir()
         (root / "responses").mkdir()

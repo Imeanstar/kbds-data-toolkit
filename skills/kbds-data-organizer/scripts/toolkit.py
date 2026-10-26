@@ -434,7 +434,15 @@ def json_bytes(data):
 
 def tsv_bytes(rows, columns, spreadsheet_safe=False):
     stream = io.StringIO(newline="")
-    writer = csv.DictWriter(stream, columns, delimiter="\t", extrasaction="ignore", lineterminator="\n")
+    class LFRecordSink:
+        def write(self, record):
+            stream.write(record[:-2] + "\n")
+            return len(record)
+    # Python 3.10 quotes CR only when it occurs in lineterminator. Keep LF records,
+    # without changing CR/CRLF inside quoted fields or the legacy serialization.
+    writer = csv.DictWriter(LFRecordSink() if spreadsheet_safe else stream, columns,
+                            delimiter="\t", extrasaction="ignore",
+                            lineterminator="\r\n" if spreadsheet_safe else "\n")
     writer.writeheader()
     for row in rows:
         if spreadsheet_safe:

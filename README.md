@@ -273,8 +273,9 @@ with Python 3.14. Filesystem tests deliberately skip on Windows. Tests do not co
 research server or model. Local model acceptance tests are separate from CI evidence.
 The session-guard behavior tests use Node.js 22 without third-party packages.
 
-The recorded review run discovered 118 Python tests: Linux passed 117 and skipped one;
-Windows passed 54 and skipped 64 Linux-only tests. All 19 session-guard tests passed.
+The recorded review run discovered 119 Python tests: Linux passed 118 and skipped one;
+local Windows passed 55 and skipped 64. CI skip counts can differ with platform capabilities,
+including symlink privileges. All 19 session-guard tests passed.
 These results cover synthetic checks, not completion of a private model-driven data job.
 
 - `AGENTS.md`: data-agent rules. Repository maintenance is a separate task.

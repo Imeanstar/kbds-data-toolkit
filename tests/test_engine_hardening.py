@@ -107,6 +107,17 @@ class ParsingTests(unittest.TestCase):
         with self.assertRaisesRegex(t.Blocked, "report_format_version"):
             t.report_bytes({**plan, "report_format_version": 99})
 
+    def test_v2_tsv_quotes_cr_but_preserves_embedded_line_endings_and_legacy_bytes(self):
+        rows = [{"a": "line\rreturn", "b": "normal"}, {"a": "plain", "b": "line\r\nbreak"}]
+        modern = t.tsv_bytes(rows, ["a", "b"], spreadsheet_safe=True)
+        self.assertEqual(modern, b'a\tb\n"line\rreturn"\tnormal\nplain\t"line\r\nbreak"\n')
+        self.assertEqual(list(csv.DictReader(io.StringIO(modern.decode(), newline=""), delimiter="\t")), rows)
+        legacy = io.StringIO(newline="")
+        writer = csv.DictWriter(legacy, ["a", "b"], delimiter="\t", extrasaction="ignore", lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+        self.assertEqual(t.tsv_bytes(rows, ["a", "b"]), legacy.getvalue().encode())
+
 
 @unittest.skipUnless(t.FILESYSTEM_SUPPORTED, "Linux no-follow filesystem integration required")
 class CopyRegressionTests(unittest.TestCase):
