@@ -159,7 +159,7 @@ class ScopeRunTests(unittest.TestCase):
         self.assertFalse(result["submission_ready"])
         self.assertTrue(Path(result["report_path"]).is_file())
         self.assertIn(approval, Path(result["report_path"]).read_text())
-        complete = json.loads((self.destination / "metadata/COMPLETE.json").read_text())
+        complete = json.loads((self.destination / "audit/COMPLETE.json").read_text())
         self.assertEqual(complete["files"], 4)
         plan = json.loads(Path(result["plan_path"]).read_text())
         self.assertEqual(plan["approval_scope_sha256"], approval)
@@ -242,7 +242,7 @@ class ScopeRunTests(unittest.TestCase):
                 result = scope_runner.main(["--scope", str(self.scope_path), "--approve-scope",
                                             t.digest(self.scope), "--name", "report-failure"])
         self.assertEqual(result, 2)
-        self.assertTrue((self.destination / "metadata/COMPLETE.json").exists())
+        self.assertTrue((self.destination / "audit/COMPLETE.json").exists())
         self.assertFalse((self.root / "work/report-failure/report.html").exists())
 
 

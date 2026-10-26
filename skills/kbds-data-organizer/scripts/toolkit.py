@@ -604,7 +604,7 @@ def make_plan(policy, decisions, name, scope_sha256=None):
         errors.append(str(exc))
     if os.path.lexists(policy["destination_root"]):
         errors.append("Destination already exists; select a NEW destination, never merge or overwrite")
-    plan = {"version": VERSION, "report_format_version": 2, "policy": policy, "inventory": records, "files": rows,
+    plan = {"version": VERSION, "report_format_version": 3, "policy": policy, "inventory": records, "files": rows,
             "excluded": excluded, "unresolved": unresolved, "errors": errors,
             "status": "READY_FOR_APPROVAL" if not unresolved and not errors and rows else "WAITING_FOR_USER",
             "submission_ready": False, "content_validation": "not_yet_run"}
@@ -630,9 +630,9 @@ def make_plan(policy, decisions, name, scope_sha256=None):
 def report_bytes(plan):
     """The same approved-plan serialization is used for writing and verification."""
     format_version = plan.get("report_format_version", 1)
-    require(type(format_version) is int and format_version in (1, 2), "Unsupported report_format_version")
+    require(type(format_version) is int and format_version in (1, 2, 3), "Unsupported report_format_version")
     def tsv(rows, columns):
-        return tsv_bytes(rows, columns, spreadsheet_safe=format_version == 2)
+        return tsv_bytes(rows, columns, spreadsheet_safe=format_version >= 2)
     inventory_columns = ["source_relative", "size", "sha256", "kind", "repository_candidate"]
     mapping_columns = ["source_relative", "destination_relative", "repository", "study", "sample", "experiment", "run", "layout", "reason", "evidence"]
     sample_columns = ["study", "sample", "experiment"]
@@ -641,17 +641,27 @@ def report_bytes(plan):
         mapping_columns = ["source_relative", "destination_relative", "repository", "study", "sample_group", "sample", "specimen",
                            "assay", "experiment", "run", "layout", "modality", "file_role", "data_role", "reason", "evidence", "modality_evidence"]
         sample_columns = ["study", "sample_group", "sample", "specimen", "assay", "experiment", "modality"]
-    samples = sorted({tuple(r.get(k, "") for k in sample_columns)
-                      for r in plan["files"] if r["repository"] == "KRA"})
-    return {
+    if format_version >= 3:
+        mapping_columns = ["source_relative", "destination_relative", "size", "sha256", "repository",
+                           "file_role", "reason", "evidence"]
+    reports = {
         "plan.json": json_bytes(plan),
         "inventory.tsv": tsv(plan["inventory"], inventory_columns),
         "file_mapping.tsv": tsv(plan["files"], mapping_columns),
-        "sample_mapping.tsv": tsv([dict(zip(sample_columns, s)) for s in samples], sample_columns),
         "unresolved.tsv": tsv(plan["unresolved"] +
             [{"source_relative": "", "reason": e} for e in plan["errors"]], ["source_relative", "reason"]),
         "excluded.tsv": tsv(plan["excluded"], ["source_relative", "reason"]),
     }
+    if format_version < 3:
+        samples = sorted({tuple(r.get(k, "") for k in sample_columns)
+                          for r in plan["files"] if r["repository"] == "KRA"})
+        reports["sample_mapping.tsv"] = tsv([dict(zip(sample_columns, s)) for s in samples], sample_columns)
+    return reports
+
+
+def audit_prefix(plan):
+    """Approved legacy packages retain their original record paths."""
+    return "audit/" if plan.get("report_format_version", 1) >= 3 else "metadata/"
 
 
 def write_reports(fd, plan, prefix=""):
@@ -724,7 +734,7 @@ def plan_summary(plan):
 def check_plan(policy, plan):
     validate_layout_policy(policy)
     require(type(plan.get("report_format_version", 1)) is int and
-            plan.get("report_format_version", 1) in (1, 2), "Unsupported report_format_version")
+            plan.get("report_format_version", 1) in (1, 2, 3), "Unsupported report_format_version")
     require(plan.get("plan_sha256") == digest({k: v for k, v in plan.items() if k != "plan_sha256"}), "Plan hash mismatch")
     require(plan["version"] == VERSION and plan["policy"] == policy, "Policy/plan changed; rebuild and reapprove")
     require(plan["status"] == "READY_FOR_APPROVAL" and not plan["unresolved"] and not plan["errors"],
@@ -816,6 +826,7 @@ def preflight(policy, plan):
 def verify(policy, plan, require_complete=True):
     expected = {r["destination_relative"] for r in plan["files"]}
     reports = report_bytes(plan)
+    audit = audit_prefix(plan)
     with directory(policy["destination_root"]) as dest:
         for row in plan["files"]:
             with regular(dest, row["destination_relative"]) as stream:
@@ -832,21 +843,21 @@ def verify(policy, plan, require_complete=True):
             for name in files:
                 require(stat.S_ISREG(os.stat(name, dir_fd=fd, follow_symlinks=False).st_mode), "Nonregular destination entry")
                 observed.add(prefix + name)
-        required = expected | {"metadata/" + n for n in reports} | {"metadata/events.jsonl"}
-        allowed = required | {"metadata/COMPLETE.json"}
+        required = expected | {audit + n for n in reports} | {audit + "events.jsonl"}
+        allowed = required | {audit + "COMPLETE.json"}
         require(observed <= allowed, "Unexpected files in destination")
         require(required <= observed, "Missing files/reports in destination")
         for name, data in reports.items():
-            with regular(dest, "metadata/" + name) as stream:
+            with regular(dest, audit + name) as stream:
                 require(stream.read(len(data) + 1) == data, "Stored report differs from approved plan: " + name)
-        with regular(dest, "metadata/events.jsonl") as stream:
+        with regular(dest, audit + "events.jsonl") as stream:
             for index, row in enumerate(plan["files"], 1):
                 line = stream.readline(MAX_LINE + 1)
                 require(len(line) <= MAX_LINE and line, "Missing/oversized copy event")
                 require(digest(json.loads(line)) == digest(copy_event(index, row, len(expected))), "Copy event mismatch")
             require(not stream.read(1), "Unexpected copy events")
         if require_complete:
-            with regular(dest, "metadata/COMPLETE.json") as stream:
+            with regular(dest, audit + "COMPLETE.json") as stream:
                 require(digest(json.load(stream)) == digest(completion_record(plan)), "Completion marker mismatch")
     event("VERIFIED", files=len(expected), mode=policy["mode"], submission_ready=False)
 
@@ -854,16 +865,19 @@ def verify(policy, plan, require_complete=True):
 def apply(policy, plan, approval):
     started = time.perf_counter()
     check_plan(policy, plan)
+    require(plan.get("report_format_version", 1) == 3,
+            "Create a new plan for audit-only output; legacy packages can only be verified or reported")
     require(approval == plan["plan_sha256"], "Exact plan hash approval is required")
     preflight(policy, plan)
     preflight_finished = time.perf_counter()
+    audit = audit_prefix(plan)
     path = PurePosixPath(policy["destination_root"])
     with directory(str(path.parent)) as parent:
         os.mkdir(path.name, 0o700, dir_fd=parent)
     try:
         with directory(policy["source_root"]) as source, directory(str(path)) as dest:
-            write_reports(dest, plan, "metadata/")
-            with regular(dest, "metadata/events.jsonl", new=True) as log:
+            write_reports(dest, plan, audit)
+            with regular(dest, audit + "events.jsonl", new=True) as log:
                 for index, row in enumerate(plan["files"], 1):
                     before = {k: row[k] for k in ("size", "mtime_ns", "device", "inode")}
                     with regular(source, row["source_relative"]) as inp:
@@ -889,7 +903,7 @@ def apply(policy, plan, approval):
                         event("COPIED", index=index, total=len(plan["files"]))
                 copy_finished = time.perf_counter()
                 verify(policy, plan, require_complete=False)
-                write_new(dest, "metadata/COMPLETE.json", json_bytes(completion_record(plan)))
+                write_new(dest, audit + "COMPLETE.json", json_bytes(completion_record(plan)))
         event("COMPLETE", destination=str(path), submission_ready=False)
     except BaseException:
         event("FAILED_PARTIAL_DESTINATION_PRESERVED", destination=str(path))

@@ -19,7 +19,14 @@ records checksum validation only. Filesystem helpers reject sensitive path compo
 opening data or control files, including when .aws is selected as a root.
 OpenCode denies native grep because its regex permission does not enforce read-path rules.
 
-New plans use `report_format_version: 2` to escape formula-like text in TSV exports with a
+New plans use `report_format_version: 3` and keep execution records in `audit/`. They do not
+generate sample metadata tables or submission sheets. Approved naming decisions remain in
+the plan so verification can reproduce the operation. Supplied source metadata is not deleted
+or rewritten. Version-1/2 packages retain their original `metadata/` records without migration.
+They remain read-only verifiable/reportable, but cannot be applied to create new output.
+New copying requires a fresh version-3 plan.
+
+New TSV exports escape formula-like text with a
 leading apostrophe. This protects common spreadsheet opening, not every spreadsheet import
 configuration. Exact strings remain in plan.json; use JSON for machine path processing.
 Older plans retain their original TSV serialization so that verification remains reproducible.

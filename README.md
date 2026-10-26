@@ -2,7 +2,8 @@
 
 Inspect sequencing files, organize an approved **copy**, verify its contents, and create a
 private HTML report. Source files and original filenames stay unchanged. The default agent
-is read-only. This project does not upload data or produce a submission-ready archive package.
+is read-only. Research/submission metadata preparation belongs to another tool. This project
+does not upload data or produce a submission-ready archive package.
 
 선택한 자료를 조사하고 승인된 새 폴더에 복사·검증합니다. 원본은 보존합니다.
 [한국어 상세 사용 안내](docs/README.ko.md)를 참고하세요.
@@ -16,8 +17,8 @@ is read-only. This project does not upload data or produce a submission-ready ar
 | KRA production input | `.fastq`, `.fq`, and gzip variants; four-line records; SINGLE or one R1/R2 pair per Run | No wrapped/interleaved FASTQ, colorspace, KRA BAM/CRAM, or format conversion |
 | Other repository outputs | Explicitly classified regular files, byte-for-byte copy and SHA-256 checks | No scientific validation of BAM, CRAM, VCF, FASTA, MEX, HDF5 or expression matrices |
 | Practice input | Explicitly approved **zero-byte** placeholders | Does not test sequencing contents or prove biological relationships |
-| Supporting documents | Selected metadata may inform operator decisions | No PDF/HWP/Excel extraction, OCR, automatic biological inference or official metadata preparation |
-| Output | New sibling folder, private plan/mappings, verification and offline HTML | No overwrite, merge, automatic resume, cleanup, deduplication, or archive upload |
+| Supporting documents | Selected metadata may inform operator decisions | No PDF/HWP/Excel extraction, OCR, automatic biological inference or research/submission metadata preparation |
+| Output | New sibling folder, execution audit records, verification and offline HTML | No research/submission metadata tables, overwrite, merge, automatic resume, cleanup, deduplication, or archive upload |
 | Language | English/Korean HTML reports; English instructions and Korean guide; UTF-8 JSON/TSV | Supplied evidence, identifiers and manual prose keep their original language |
 
 KRA/KEA/KVar/KNA are K-BDS routes; GEO is a separate NCBI archive. The repository setting
@@ -207,12 +208,22 @@ paths require a new reviewed scope; changing files does not permit merging into 
 
 ## 5. Read the result and handle a stop
 
-The private plan directory contains `plan.json`, TSV mappings and `report.html`. Output
-`metadata/` contains audit records. Reports always state `submission_ready=false`.
-New plans use `report_format_version: 2`: TSV text that could start a spreadsheet formula
+The private plan directory contains `plan.json`, four audit TSVs and `report.html`. New output
+`audit/` contains seven execution records: `plan.json`, `inventory.tsv`, `file_mapping.tsv`,
+`unresolved.tsv`, `excluded.tsv`, `events.jsonl` and `COMPLETE.json`.
+No `sample_mapping.tsv` or research/submission metadata table is generated. The file map
+contains source/output paths, size, SHA-256, repository, file role, reason and evidence.
+The plan retains approved folder decisions so verification can reproduce the operation;
+these records do not supply verified biological facts or official submission fields.
+Selected existing metadata may inform decisions and remains subject to source preservation
+and explicit include/exclude rules. Reports always state `submission_ready=false`.
+New plans use `report_format_version: 3`: TSV text that could start a spreadsheet formula
 gets a leading apostrophe. Exact original strings remain in `plan.json`. Use that JSON as
 the source for automated path processing; do not treat the escaped TSV cell as a filename.
-Older plans keep their original TSV serialization. Stricter current path checks can still
+Version-1/2 plans keep their original TSV serialization and `metadata/` records, including
+their sample table. They remain available for read-only verification and reports; applying an
+old plan to a new output is blocked. Create a fresh version-3 plan for new copies. Existing
+packages are not migrated or cleaned up. Stricter path checks can still
 reject an old nonportable package; the toolkit does not rewrite it.
 HTML is self-contained, with no remote fonts/images/styles. Reports default to Korean.
 Append **`--language en` as the last option** to `run` or `report` for English generated
@@ -235,7 +246,7 @@ including when another language is requested. A browser can print HTML to PDF.
 Do not claim browser/print QA on a headless host unless it was actually performed.
 
 Production checks file size/SHA-256 and supported KRA FASTQ contents. Other repository files
-receive `sha256_only` validation. A separate `verify` checks stored bytes and metadata; it
+receive `sha256_only` validation. A separate `verify` checks stored bytes and audit records; it
 does not repeat FASTQ parsing. Practice checks empty placeholders and path/pair consistency.
 None of these checks establishes scientific correctness or release permission.
 
@@ -251,8 +262,10 @@ and names incompatible with portable file components cause a stop, not an automa
 The engine remains Linux-only; long-path limits, network filesystems and cross-platform
 exports still need testing on the intended storage. Use UTF-8 for private JSON/TSV.
 
-`run` stdout includes `timings_seconds` for scope checks, planning, preflight, copy/metadata,
+`run` stdout includes `timings_seconds` for scope checks, planning, preflight, copy/audit records,
 verification and report verification/rendering. These durations measure the tool process.
+The timing key `copy_and_metadata` is retained for compatibility and now measures copying
+plus execution-record writing; it does not mean research metadata generation.
 They exclude model generation and OpenCode approval waits. Use session timestamps separately
 for end-to-end time; file modification times do not establish exact phase durations.
 

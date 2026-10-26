@@ -109,10 +109,10 @@ def plan_report_content(plan, language="ko"):
                              f"File evidence: {evidence} / Modality evidence: {modality_evidence}")
                           for evidence, modality_evidence in proofs[:3])
         proof_note = say(f" 근거: {shown}.", f" Evidence: {shown}.") if shown else say(
-            " 근거는 file_mapping.tsv에 기록되어 있습니다.", " Evidence is recorded in file_mapping.tsv.")
+            " 근거는 plan.json에 기록되어 있습니다.", " Evidence is recorded in plan.json.")
         if len(proofs) > 3:
-            proof_note += say(f" 추가 근거 {len(proofs) - 3}건은 file_mapping.tsv를 확인하십시오.",
-                              f" See file_mapping.tsv for {len(proofs) - 3} additional evidence records.")
+            proof_note += say(f" 추가 근거 {len(proofs) - 3}건은 plan.json을 확인하십시오.",
+                              f" See plan.json for {len(proofs) - 3} additional evidence records.")
         if members[0]["repository"] == "KRA":
             sample_ids = {r["sample"] for r in members}
             specimens = {r["specimen"] for r in members}
@@ -164,6 +164,9 @@ def plan_report_content(plan, language="ko"):
     if plan["policy"]["mode"] == "practice":
         results.append(say("연습 모드는 0바이트 자리표시자의 경로와 크기만 검사했습니다. 연습용 가정은 실데이터의 확인 사실이 아닙니다.",
                            "Practice mode checks only paths and sizes of zero-byte placeholders. Fictional practice assumptions are not verified facts about research data."))
+    if plan.get("report_format_version", 1) == 3:
+        results.append(say("audit/에는 복사와 검증에 필요한 실행 기록을 저장했습니다. 샘플·실험 메타데이터 표와 제출 서식은 생성하지 않았습니다. 해당 작업은 별도 도구에서 수행합니다.",
+                           "The audit/ folder contains copy and verification records. No sample/experiment metadata tables or submission forms were generated. A separate tool handles that work."))
     if "approval_scope_sha256" in plan:
         results.append(say("승인된 범위 정책으로 계획·복사·검증을 자동 실행했습니다. 범위 SHA-256: ",
                            "Planning, copying and verification ran under an approved scoped policy. Scope SHA-256: ")

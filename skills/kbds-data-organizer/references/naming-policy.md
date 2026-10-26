@@ -30,11 +30,17 @@ Example_makeup/
         ID001/
           RNA_library/Run_R/R1/ID001-R_1.fastq.gz
           RNA_library/Run_R/R2/ID001-R_2.fastq.gz
-  metadata/
+  audit/
 ```
 
 KRA path relative to its output:
 `<output-name>_<modality>/<study>/<sample_group>/<sample>/<experiment>/<run>/<file_role>/<original_filename>`.
+
+These are approved organization labels, not a generated research metadata table. New outputs
+do not create sample_mapping.tsv. The plan retains decisions for verification; audit/file_mapping.tsv
+records paths and copy evidence. Existing source metadata remains protected and follows explicit
+include/exclude decisions. Version-1/2 packages retain their old metadata/ records unchanged.
+Verify or report those packages read-only; create a fresh version-3 plan before any new copying.
 
 - `sample_group`: confirmed B, D or R label. Keep these as separate Sample branches.
   Confirm what each token means for this dataset; a token is not a specimen type or BioSample.
@@ -110,7 +116,7 @@ Never merge files because they have identical names or empty practice hashes.
 Use UTF-8 JSON. Source filenames that cannot decode as Unicode and destination components
 longer than 255 UTF-8 bytes stop validation. Original Unicode spelling is retained; normalization
 is used only to detect aliases. New TSV exports prefix formula-like cell values with an apostrophe
-(`report_format_version: 2`). Exact filenames and evidence remain in plan.json. Machine readers
+(`report_format_version: 3`). Exact filenames and evidence remain in plan.json. Machine readers
 must use that JSON instead of treating an escaped TSV cell as a filesystem path.
 
 Policies without layout_version retain legacy layout 1 so old plans can still be checked.

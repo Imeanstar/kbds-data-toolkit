@@ -12,6 +12,9 @@ practice/production mode and repository scope; use `config/*.example.json` only 
 schemas. Plans and reports stay in the authorized private workspace outside source/output.
 New plans use `layout_version: 2`, one policy/plan per confirmed repository, and full combined
 source coverage for split outputs. Do not commit private control files or reports.
+New plans use `report_format_version: 3` and write execution records to `audit/`, without
+sample metadata tables. Existing version-1/2 outputs can be verified/reported read-only;
+their old plans cannot be applied to a new output. Create a fresh version-3 plan for copying.
 
 Before the first real staging job on a host, run `python3 scripts/kbds.py self-check`. It creates, copies,
 verifies and removes only synthetic empty files in a new temporary directory. A failure means

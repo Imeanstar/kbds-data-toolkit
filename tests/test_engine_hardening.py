@@ -118,6 +118,30 @@ class ParsingTests(unittest.TestCase):
         writer.writerows(rows)
         self.assertEqual(t.tsv_bytes(rows, ["a", "b"]), legacy.getvalue().encode())
 
+    def test_v3_exports_file_audit_without_sample_metadata(self):
+        row = {"source_relative": "source_R1.fq", "destination_relative": "copy/source_R1.fq",
+               "size": 0, "sha256": None, "repository": "KRA", "file_role": "R1",
+               "reason": "Approved copy", "evidence": "=user supplied evidence",
+               "study": "Study", "sample_group": "D", "sample": "Sample", "specimen": "Specimen",
+               "assay": "Assay", "experiment": "Library", "run": "Run", "layout": "PAIRED",
+               "modality": "bulk", "modality_evidence": "Approved only for naming"}
+        plan = {"report_format_version": 3, "policy": {"layout_version": 2}, "inventory": [],
+                "files": [row], "unresolved": [], "errors": [], "excluded": []}
+        reports = t.report_bytes(plan)
+        self.assertEqual(set(reports), {"plan.json", "inventory.tsv", "file_mapping.tsv",
+                                       "unresolved.tsv", "excluded.tsv"})
+        parsed = list(csv.DictReader(io.StringIO(reports["file_mapping.tsv"].decode()), delimiter="\t"))
+        self.assertEqual(list(parsed[0]), ["source_relative", "destination_relative", "size", "sha256",
+                                          "repository", "file_role", "reason", "evidence"])
+        self.assertEqual(parsed[0]["evidence"], "'=user supplied evidence")
+        self.assertEqual(json.loads(reports["plan.json"])["files"], [row])
+        self.assertEqual(t.audit_prefix(plan), "audit/")
+        legacy = t.report_bytes({**plan, "report_format_version": 2})
+        self.assertEqual(legacy["sample_mapping.tsv"],
+                         b"study\tsample_group\tsample\tspecimen\tassay\texperiment\tmodality\n"
+                         b"Study\tD\tSample\tSpecimen\tAssay\tLibrary\tbulk\n")
+        self.assertIn(b"\trun\tlayout\tmodality\t", legacy["file_mapping.tsv"].splitlines()[0])
+
 
 @unittest.skipUnless(t.FILESYSTEM_SUPPORTED, "Linux no-follow filesystem integration required")
 class CopyRegressionTests(unittest.TestCase):
@@ -132,20 +156,46 @@ class CopyRegressionTests(unittest.TestCase):
         for decision in fixture.decisions["files"].values():
             decision["evidence"] = "=1+2"
         plan = fixture.plan()
-        self.assertEqual(plan["report_format_version"], 2)
+        self.assertEqual(plan["report_format_version"], 3)
         t.apply(fixture.policy, plan, plan["plan_sha256"])
-        self.assertIn("'=1+2", (fixture.dest / "metadata/file_mapping.tsv").read_text())
+        self.assertIn("'=1+2", (fixture.dest / "audit/file_mapping.tsv").read_text())
         t.verify(fixture.policy, plan)
-        # Simulate an old approved package's serialization, not an upgrade in place.
-        legacy = copy.deepcopy(plan)
-        del legacy["report_format_version"]
-        legacy["policy"]["destination_root"] = str(fixture.base / "legacy")
-        legacy["plan_sha256"] = t.digest({k: v for k, v in legacy.items() if k != "plan_sha256"})
-        t.apply(legacy["policy"], legacy, legacy["plan_sha256"])
-        t.verify(legacy["policy"], legacy)
-        legacy_tsv = (fixture.base / "legacy/metadata/file_mapping.tsv").read_text()
-        self.assertIn("\t=1+2", legacy_tsv)
-        path = fixture.dest / "metadata/file_mapping.tsv"
+        # Simulate old approved packages, never upgrade their bytes in place.
+        for version in (1, 2):
+            with self.subTest(legacy_version=version):
+                legacy = copy.deepcopy(plan)
+                if version == 1:
+                    del legacy["report_format_version"]
+                else:
+                    legacy["report_format_version"] = version
+                output = fixture.base / f"legacy-{version}"
+                legacy["policy"]["destination_root"] = str(output)
+                legacy["plan_sha256"] = t.digest({k: v for k, v in legacy.items() if k != "plan_sha256"})
+                with self.assertRaisesRegex(t.Blocked, "Create a new plan"):
+                    t.apply(legacy["policy"], legacy, legacy["plan_sha256"])
+                self.assertFalse(output.exists())
+                # A historical fixture is created directly; the engine must not emit old metadata.
+                for row in legacy["files"]:
+                    target = output / row["destination_relative"]
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes((fixture.src / row["source_relative"]).read_bytes())
+                records = output / "metadata"
+                records.mkdir()
+                for name, data in t.report_bytes(legacy).items():
+                    (records / name).write_bytes(data)
+                events = [t.copy_event(index, row, len(legacy["files"]))
+                          for index, row in enumerate(legacy["files"], 1)]
+                (records / "events.jsonl").write_text("".join(json.dumps(event) + "\n" for event in events))
+                (records / "COMPLETE.json").write_bytes(t.json_bytes(t.completion_record(legacy)))
+                before = {p.name: p.read_bytes() for p in (output / "metadata").iterdir()}
+                t.verify(legacy["policy"], legacy)
+                self.assertEqual(before, {p.name: p.read_bytes() for p in (output / "metadata").iterdir()})
+                self.assertEqual(len(before), 8)
+                self.assertIn("sample_mapping.tsv", before)
+                self.assertFalse((output / "audit").exists())
+                self.assertIn("\t=1+2" if version == 1 else "\t'=1+2",
+                              before["file_mapping.tsv"].decode())
+        path = fixture.dest / "audit/file_mapping.tsv"
         path.write_text(path.read_text().replace("'=1+2", "=1+2"))
         with self.assertRaisesRegex(t.Blocked, "Stored report differs"):
             t.verify(fixture.policy, plan)

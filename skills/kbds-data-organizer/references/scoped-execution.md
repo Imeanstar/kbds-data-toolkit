@@ -57,16 +57,19 @@ a new plan, checks every source file, copies, verifies and creates `report.html`
 The plan records `approval_scope_sha256`. Source changes between planning and copying still
 block execution. Matching new files present before planning use the same approved rules.
 
-Any unmatched file, ambiguous rule, missing mate, invalid metadata, inventory error or occupied
+Any unmatched file, ambiguous rule, missing mate, invalid decision, inventory error or occupied
 destination stops before copying. Exit 2 / WAITING_FOR_USER is an exception to resolve, not a
 request for routine plan approval. Do not auto-exclude unknown files. Policy/rule changes need
 scope review and a new scope hash. Preserve partial output after errors/timeouts; do not resume,
 delete, merge or silently select another output. An occupied successful output also stops.
 
 Report actual counts, scope/plan hashes, validation limits and report path. The report command
-verifies files/metadata before writing. Keep submission_ready=false; no archive upload.
+verifies files/audit records before writing. New records use audit/ without sample_mapping.tsv;
+research/submission metadata preparation belongs to another tool. Keep submission_ready=false;
+no archive upload.
 Successful stdout includes `timings_seconds`: scope_validation, planning, scope_recheck,
 preflight, copy_and_metadata, verification, report_verification_and_rendering and total.
+The compatibility key copy_and_metadata measures copying and execution-record writing.
 These are measured inside the tool process; they exclude model generation and permission
 waits. The report phase includes another verification. Do not count it as rendering alone.
 After verified COMPLETE, give the result once and stop; automatic compaction is not a new task.

@@ -224,9 +224,9 @@ class LayoutTests(unittest.TestCase):
             self.assertIn("data:image/svg+xml;base64,", report.read_text(encoding="utf-8"))
             self.assertEqual(len(list(Path(p["destination_root"]).rglob("*.fastq.gz"))), 6)
             self.assertEqual(len(list(Path(p["source_root"]).rglob("*.fastq.gz"))), 6)
-            mapping = Path(p["destination_root"]) / "metadata/file_mapping.tsv"
-            self.assertIn("modality_evidence", mapping.read_text())
-            mapping.write_text(mapping.read_text().replace("Synthetic protocol", "Unapproved protocol"))
+            mapping = Path(p["destination_root"]) / "audit/file_mapping.tsv"
+            self.assertNotIn("modality_evidence", mapping.read_text().splitlines()[0])
+            mapping.write_text(mapping.read_text().replace("Synthetic specimen/library record", "Unapproved evidence"))
             with self.assertRaises(t.Blocked):
                 t.verify(p, plan)
             with self.assertRaisesRegex(ValueError, "Stored report differs"):

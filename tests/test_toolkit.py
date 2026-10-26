@@ -443,11 +443,20 @@ class ToolkitTests(unittest.TestCase):
         self.assertEqual((self.src / "ignore.txt").read_text(), "Keep source")
         self.assertFalse(list(self.dest.rglob("ignore.txt")))
 
-    def test_metadata_reports_delivered(self):
+    def test_only_audit_records_are_delivered_without_sample_metadata(self):
         plan = self.plan()
+        self.assertEqual(plan["report_format_version"], 3)
+        records = {"plan.json", "inventory.tsv", "file_mapping.tsv", "unresolved.tsv", "excluded.tsv"}
+        work = Path(self.policy["workspace_root"]) / f"plan-{self.counter}"
+        self.assertEqual({p.name for p in work.iterdir()}, records)
         t.apply(self.policy, plan, plan["plan_sha256"])
-        for name in ("inventory.tsv", "file_mapping.tsv", "sample_mapping.tsv", "unresolved.tsv", "excluded.tsv"):
-            self.assertTrue((self.dest / "metadata" / name).is_file())
+        self.assertEqual({p.name for p in (self.dest / "audit").iterdir()},
+                         records | {"events.jsonl", "COMPLETE.json"})
+        self.assertFalse((self.dest / "metadata").exists())
+        self.assertFalse(list(self.dest.rglob("sample_mapping.tsv")))
+        for name in records:
+            self.assertEqual((work / name).read_bytes(), (self.dest / "audit" / name).read_bytes())
+        t.verify(self.policy, plan)
 
     def test_cli_waiting_exit_status(self):
         policy = self.base / "policy.json"
@@ -473,7 +482,7 @@ class ToolkitTests(unittest.TestCase):
         t.apply(self.policy, plan, plan["plan_sha256"])
         for name in t.report_bytes(plan):
             with self.subTest(report=name):
-                path = self.dest / "metadata" / name
+                path = self.dest / "audit" / name
                 original = path.read_bytes()
                 path.write_bytes(b"corrupted synthetic report\n")
                 with self.assertRaises(t.Blocked):
@@ -483,7 +492,7 @@ class ToolkitTests(unittest.TestCase):
     def test_all_completion_fields_are_validated(self):
         plan = self.plan()
         t.apply(self.policy, plan, plan["plan_sha256"])
-        path = self.dest / "metadata/COMPLETE.json"
+        path = self.dest / "audit/COMPLETE.json"
         original = json.loads(path.read_text())
         for key, value in {"mode": "production", "files": 999, "submission_ready": True,
                            "validation": "invented", "plan_sha256": "0" * 64}.items():
@@ -497,7 +506,7 @@ class ToolkitTests(unittest.TestCase):
     def test_copy_event_sequence_is_validated(self):
         plan = self.plan()
         t.apply(self.policy, plan, plan["plan_sha256"])
-        path = self.dest / "metadata/events.jsonl"
+        path = self.dest / "audit/events.jsonl"
         original = path.read_bytes()
         first = json.loads(original.splitlines()[0])
         for data in (json.dumps({**first, "index": True}).encode() + b"\n" + original.splitlines(keepends=True)[1],
@@ -519,7 +528,7 @@ class ToolkitTests(unittest.TestCase):
         plan = self.plan()
         t.apply(self.policy, plan, plan["plan_sha256"])
         t.verify(self.policy, plan)
-        marker = json.loads((self.dest / "metadata/COMPLETE.json").read_text())
+        marker = json.loads((self.dest / "audit/COMPLETE.json").read_text())
         self.assertEqual(marker["validation"], "sha256_only")
 
     def test_sensitive_roots_and_direct_files_block_before_open(self):
@@ -614,7 +623,7 @@ class ToolkitTests(unittest.TestCase):
         progress = [event for event in events if event["event"] == "COPIED"]
         self.assertLessEqual(len(progress), 22)
         self.assertEqual((progress[0]["index"], progress[-1]["index"]), (1, 128))
-        self.assertEqual(len((self.dest / "metadata/events.jsonl").read_text().splitlines()), 128)
+        self.assertEqual(len((self.dest / "audit/events.jsonl").read_text().splitlines()), 128)
         t.verify(self.policy, plan)
 
     def test_cli_verify_does_not_claim_to_repeat_fastq_checks(self):

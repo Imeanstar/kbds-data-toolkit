@@ -20,6 +20,9 @@ Label any unexecuted structure as planned. Do not show a new layout as an existi
 Do not replace unknown counts with zero. Practice assumptions belong only to this dataset's
 private records and report, not to reusable classification defaults. Do not equate local IDs
 with official archive accessions or claim submission readiness.
+Describe approved organization decisions from plan.json. Do not create a separate sample
+metadata table, fill research/submission fields, or turn practice labels into biological facts.
+Metadata preparation belongs to another tool; the HTML explains this skill's execution result.
 
 ## Verified plan report
 
@@ -47,7 +50,7 @@ relationships absent from mappings. A practice label is not biological evidence.
 generation, approval waits and total session elapsed time. The report phase includes verification;
 do not describe it as HTML rendering alone. Do not estimate exact phases from file timestamps.
 New TSV cells that could execute a spreadsheet formula are prefixed with an apostrophe;
-exact original strings remain in plan.json (`report_format_version: 2`).
+exact original strings remain in plan.json (`report_format_version: 3` for new plans).
 
 Keep the report in the private workspace. Moving it to a user's approved computer is a separate
 authorized action; never publish it with the reusable skill. The plan, mappings and logs can
