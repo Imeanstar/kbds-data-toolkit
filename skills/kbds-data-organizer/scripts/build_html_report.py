@@ -9,7 +9,14 @@ import json
 from pathlib import Path
 
 
-def build_report(data, data_path, output, svg=None):
+def language_text(language):
+    if language not in ("ko", "en"):
+        raise ValueError("Report language must be ko or en")
+    return lambda ko, en: ko if language == "ko" else en
+
+
+def build_report(data, data_path, output, svg=None, language="ko"):
+    say = language_text(language)
     required = ("title", "source_path", "destination_paths", "results", "relationships")
     if svg is None:
         required += ("structure_image",)
@@ -36,12 +43,12 @@ def build_report(data, data_path, output, svg=None):
     paragraphs = lambda values: "\n".join(f"<p>{h(value)}</p>" for value in values)
     image = base64.b64encode(image_bytes).decode("ascii")
     paths = "\n".join(
-        f'<div><span>{label}</span><code>{h(value)}</code></div>'
-        for label, value in [("원본 폴더", data["source_path"])]
-        + [(data.get("destination_label", "생성 폴더"), value) for value in data["destination_paths"]]
+        f'<div><span>{h(label)}</span><code>{h(value)}</code></div>'
+        for label, value in [(say("원본 폴더", "Source folder"), data["source_path"])]
+        + [(data.get("destination_label", say("생성 폴더", "Output folder")), value) for value in data["destination_paths"]]
     )
     document = f"""<!doctype html>
-<html lang="ko">
+<html lang="{language}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -68,16 +75,16 @@ def build_report(data, data_path, output, svg=None):
 </style>
 </head>
 <body>
-<button class="print" type="button" onclick="window.print()">PDF로 저장 / 인쇄</button>
+<button class="print" type="button" onclick="window.print()">{say('PDF로 저장 / 인쇄', 'Save as PDF / Print')}</button>
 <main>
   <h1>{h(data['title'])}</h1>
   <div class="paths">{paths}</div>
   <figure>
-    <img src="data:{image_type};base64,{image}" alt="{h(data.get('image_alt', 'Study, Sample, Experiment, Run과 파일 수를 나타낸 폴더 구조'))}">
-    <figcaption>{h(data.get('image_caption', '실제 생성된 폴더 구조'))}</figcaption>
+    <img src="data:{image_type};base64,{image}" alt="{h(data.get('image_alt', say('Study, Sample, Experiment, Run과 파일 수를 나타낸 폴더 구조', 'Folder structure with Study, Sample, Experiment, Run and file counts')))}">
+    <figcaption>{h(data.get('image_caption', say('실제 생성된 폴더 구조', 'Created folder structure')))}</figcaption>
   </figure>
-  <section class="section" aria-labelledby="results"><h2 id="results">조사 결과</h2>{paragraphs(data['results'])}</section>
-  <section class="section" aria-labelledby="relationships"><h2 id="relationships">구조상 확인된 관계</h2>{paragraphs(data['relationships'])}</section>
+  <section class="section" aria-labelledby="results"><h2 id="results">{say('조사 결과', 'Results')}</h2>{paragraphs(data['results'])}</section>
+  <section class="section" aria-labelledby="relationships"><h2 id="relationships">{say('구조상 확인된 관계', 'Relationships recorded in the mapping')}</h2>{paragraphs(data['relationships'])}</section>
 </main>
 </body>
 </html>
@@ -87,8 +94,9 @@ def build_report(data, data_path, output, svg=None):
         stream.write(document)
 
 
-def plan_report_content(plan):
+def plan_report_content(plan, language="ko"):
     """Summarize only mappings recorded in the approved plan; do not infer biology."""
+    say = language_text(language)
     rows = plan["files"]
     groups = defaultdict(list)
     for row in rows:
@@ -97,66 +105,92 @@ def plan_report_content(plan):
     branches, relationships = [], []
     for (modality, study, group), members in sorted(groups.items()):
         proofs = sorted({(r.get("evidence", ""), r.get("modality_evidence", "")) for r in members})
-        shown = "; ".join(f"파일: {evidence} / 유형: {modality_evidence}"
+        shown = "; ".join(say(f"파일: {evidence} / 유형: {modality_evidence}",
+                             f"File evidence: {evidence} / Modality evidence: {modality_evidence}")
                           for evidence, modality_evidence in proofs[:3])
-        proof_note = f" 근거: {shown}." if shown else " 근거는 file_mapping.tsv에 기록되어 있습니다."
+        proof_note = say(f" 근거: {shown}.", f" Evidence: {shown}.") if shown else say(
+            " 근거는 file_mapping.tsv에 기록되어 있습니다.", " Evidence is recorded in file_mapping.tsv.")
         if len(proofs) > 3:
-            proof_note += f" 추가 근거 {len(proofs) - 3}건은 file_mapping.tsv를 확인하십시오."
+            proof_note += say(f" 추가 근거 {len(proofs) - 3}건은 file_mapping.tsv를 확인하십시오.",
+                              f" See file_mapping.tsv for {len(proofs) - 3} additional evidence records.")
         if members[0]["repository"] == "KRA":
             sample_ids = {r["sample"] for r in members}
             specimens = {r["specimen"] for r in members}
             experiments = {(r["sample"], r["experiment"]) for r in members}
             runs = {(r["sample"], r["experiment"], r["run"]) for r in members}
             roles = Counter(r["file_role"] for r in members)
-            branches.append((f"{modality} / {study}", f"{group}: {len(sample_ids)} ID / {len(specimens)} 검체",
+            branches.append((f"{modality} / {study}", say(f"{group}: {len(sample_ids)} ID / {len(specimens)} 검체",
+                                                        f"{group}: IDs {len(sample_ids)} / specimens {len(specimens)}"),
                              f"{len(experiments)} Experiment", f"{len(runs)} Run",
                              ", ".join(f"{role} {count}" for role, count in sorted(roles.items()))))
-            relationships.append(f"{study} / {modality} / {group}: 승인된 매핑에 Sample ID {len(sample_ids)}개, "
+            relationships.append(say(f"{study} / {modality} / {group}: 승인된 매핑에 Sample ID {len(sample_ids)}개, "
                                  f"검체 {len(specimens)}개, "
                                  f"Experiment {len(experiments)}개, Run {len(runs)}개가 기록되어 있습니다. "
-                                 f"파일 역할은 {', '.join(f'{role} {count}개' for role, count in sorted(roles.items()))}입니다."
+                                 f"파일 역할은 {', '.join(f'{role} {count}개' for role, count in sorted(roles.items()))}입니다.",
+                                 f"{study} / {modality} / {group}: the approved mapping records Sample IDs: {len(sample_ids)}, "
+                                 f"specimens: {len(specimens)}, Experiments: {len(experiments)}, Runs: {len(runs)}. "
+                                 f"File roles: {', '.join(f'{role}: {count}' for role, count in sorted(roles.items()))}.")
                                  + proof_note)
         else:
-            branches.append((f"{modality} / {study}", group, "Sample 미기록", "Experiment·Run 미기록",
-                             f"파일 {len(members)}개"))
-            relationships.append(f"{study} / {modality} / {group}: 파일 {len(members)}개가 "
-                                 "원본 상대 경로를 유지합니다. Sample·Experiment·Run 관계는 이 계획에 기록되지 않았습니다."
+            branches.append((f"{modality} / {study}", group, say("Sample 미기록", "Sample not recorded"),
+                             say("Experiment·Run 미기록", "Experiment/Run not recorded"),
+                             say(f"파일 {len(members)}개", f"{len(members)} files")))
+            relationships.append(say(f"{study} / {modality} / {group}: 파일 {len(members)}개가 "
+                                 "원본 상대 경로를 유지합니다. Sample·Experiment·Run 관계는 이 계획에 기록되지 않았습니다.",
+                                 f"{study} / {modality} / {group}: {len(members)} files retain their source-relative paths. "
+                                 "Sample, Experiment and Run relationships are not recorded in this plan.")
                                  + proof_note)
     inventory = plan["inventory"]
     kinds = Counter(r["kind"] for r in inventory)
     source_dirs = {str(parent) for r in inventory for parent in Path(r["source_relative"]).parents
                    if str(parent) != "."}
     results = [
-        f"원본 목록: 파일 {len(inventory)}개, 파일 경로상 확인된 하위 폴더 {len(source_dirs)}개, "
-        f"총 {sum(r['size'] for r in inventory):,}바이트.",
-        "확인된 파일 종류 후보: " + ", ".join(f"{kind} {count}개" for kind, count in sorted(kinds.items())) + ".",
-        f"복사·검증 완료: 포함 {len(rows)}개, 제외 {len(plan['excluded'])}개, "
+        say(f"원본 목록: 파일 {len(inventory)}개, 파일 경로상 확인된 하위 폴더 {len(source_dirs)}개, "
+            f"총 {sum(r['size'] for r in inventory):,}바이트.",
+            f"Source inventory: {len(inventory)} files, {len(source_dirs)} subfolders represented by file paths, "
+            f"{sum(r['size'] for r in inventory):,} bytes total."),
+        say("확인된 파일 종류 후보: " + ", ".join(f"{kind} {count}개" for kind, count in sorted(kinds.items())) + ".",
+            "File-type candidates: " + ", ".join(f"{kind}: {count}" for kind, count in sorted(kinds.items())) + "."),
+        say(f"복사·검증 완료: 포함 {len(rows)}개, 제외 {len(plan['excluded'])}개, "
         f"미해결 {len(plan['unresolved'])}개, 목록 오류 {len(plan['errors'])}개. "
         f"검증 모드: {plan['policy']['mode']}. 계획 SHA-256: {plan['plan_sha256']}.",
-        "이 폴더는 제출용 임시 정리 결과입니다. 저장소 제출 가능 여부와 생물학적 동일성은 검증하지 않았습니다.",
+        f"Copy and verification complete: {len(rows)} included files, {len(plan['excluded'])} excluded, "
+        f"{len(plan['unresolved'])} unresolved, {len(plan['errors'])} inventory errors. "
+        f"Validation mode: {plan['policy']['mode']}. Plan SHA-256: {plan['plan_sha256']}."),
+        say("이 폴더는 제출용 임시 정리 결과입니다. 저장소 제출 가능 여부와 생물학적 동일성은 검증하지 않았습니다.",
+            "This folder is a staging result. Archive submission eligibility and biological identity were not verified."),
+        "submission_ready=false",
     ]
     if plan["policy"]["mode"] == "practice":
-        results.append("연습 모드는 0바이트 자리표시자의 경로와 크기만 검사했습니다. 연습용 가정은 실데이터의 확인 사실이 아닙니다.")
+        results.append(say("연습 모드는 0바이트 자리표시자의 경로와 크기만 검사했습니다. 연습용 가정은 실데이터의 확인 사실이 아닙니다.",
+                           "Practice mode checks only paths and sizes of zero-byte placeholders. Fictional practice assumptions are not verified facts about research data."))
     if "approval_scope_sha256" in plan:
-        results.append("승인된 범위 정책으로 계획·복사·검증을 자동 실행했습니다. 범위 SHA-256: "
+        results.append(say("승인된 범위 정책으로 계획·복사·검증을 자동 실행했습니다. 범위 SHA-256: ",
+                           "Planning, copying and verification ran under an approved scoped policy. Scope SHA-256: ")
                        + plan["approval_scope_sha256"] + ".")
-    relationships.append("위 관계는 승인된 파일 매핑의 구조입니다. 같은 ID의 생물학적 관계는 별도 근거 없이 확정하지 않았습니다.")
-    data = {"title": f"{Path(plan['policy']['source_root']).name} 데이터 정리 보고서",
+    relationships.append(say("위 관계는 승인된 파일 매핑의 구조입니다. 같은 ID의 생물학적 관계는 별도 근거 없이 확정하지 않았습니다.",
+                             "These relationships describe the approved file mapping. Shared IDs do not establish biological relationships without separate evidence."))
+    data = {"title": say(f"{Path(plan['policy']['source_root']).name} 데이터 정리 보고서",
+                          f"{Path(plan['policy']['source_root']).name} data staging report"),
             "source_path": plan["policy"]["source_root"],
             "destination_paths": [plan["policy"]["destination_root"]],
-            "image_caption": "검증된 출력의 분류별 구조 요약. 숫자는 해당 가지에 포함된 고유 항목 또는 파일 수입니다.",
+            "image_caption": say("검증된 출력의 분류별 구조 요약. 숫자는 해당 가지에 포함된 고유 항목 또는 파일 수입니다.",
+                                 "Verified output structure by category. Counts show unique entries or files in each branch."),
             "results": results, "relationships": relationships}
     return data, branches
 
 
-def structure_svg(branches):
+def structure_svg(branches, language="ko"):
     """A small, self-contained Study → Sample → Experiment → Run diagram."""
+    say = language_text(language)
     columns = ((20, 216), (250, 174), (458, 174), (666, 174), (874, 300))
     height = 66 + 94 * len(branches)
     lines = [f'<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="{height}" viewBox="0 0 1200 {height}">',
              '<rect width="1200" height="100%" fill="#f8fafc"/>',
              '<style>text{font:16px sans-serif;fill:#172554}.small{font:12px sans-serif;fill:#475569}</style>',
-             '<text x="20" y="31" class="small">Study / modality → Sample → Experiment → Run → file roles</text>']
+             '<text x="20" y="31" class="small">' + say(
+                 'Study / 유형 → Sample → Experiment → Run → 파일 역할',
+                 'Study / modality → Sample → Experiment → Run → file roles') + '</text>']
     for index, branch in enumerate(branches):
         y = 47 + index * 94
         for col, (x, width) in enumerate(columns):
@@ -169,8 +203,9 @@ def structure_svg(branches):
     return "".join(lines) + "</svg>"
 
 
-def build_verified_report(plan_path):
+def build_verified_report(plan_path, language="ko"):
     """Write one new report beside a verified plan on the Linux data host."""
+    language_text(language)
     script = Path(__file__).with_name("toolkit.py")
     spec = importlib.util.spec_from_file_location("kbds_report_toolkit", script)
     toolkit = importlib.util.module_from_spec(spec)
@@ -181,9 +216,9 @@ def build_verified_report(plan_path):
     toolkit.require(plan["policy"].get("layout_version") == 2,
                     "Automatic HTML reports require a layout-version-2 plan")
     toolkit.verify(plan["policy"], plan)
-    data, branches = plan_report_content(plan)
+    data, branches = plan_report_content(plan, language)
     output = plan_path.with_name("report.html")
-    build_report(data, plan_path, output, svg=structure_svg(branches))
+    build_report(data, plan_path, output, svg=structure_svg(branches, language), language=language)
     return output
 
 
@@ -193,13 +228,14 @@ if __name__ == "__main__":
     source.add_argument("--data", help="Private local report JSON")
     source.add_argument("--plan", help="Verified plan.json on the Linux data host")
     parser.add_argument("--output", help="New private local HTML path; used with --data")
+    parser.add_argument("--language", choices=("ko", "en"), default="ko", help="Report language; supplied evidence stays unchanged")
     args = parser.parse_args()
     if args.plan:
         if args.output:
             parser.error("--plan writes report.html beside the plan; omit --output")
-        print(build_verified_report(args.plan))
+        print(build_verified_report(args.plan, args.language))
     else:
         if not args.output:
             parser.error("--data requires --output")
         data_path = Path(args.data).resolve()
-        build_report(json.loads(data_path.read_text(encoding="utf-8")), data_path, args.output)
+        build_report(json.loads(data_path.read_text(encoding="utf-8")), data_path, args.output, language=args.language)

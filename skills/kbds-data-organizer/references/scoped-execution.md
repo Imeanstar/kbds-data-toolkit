@@ -46,6 +46,11 @@ and not the checksum of the JSON file's bytes. The scope file has no credentials
 python3 scripts/kbds.py run --scope /absolute/repo/config/scope.local.json --approve-scope APPROVED_SCOPE_SHA256 --name new-job-001
 ```
 
+Optionally append `--language en` as the last option for an English HTML report, or
+`--language ko` for Korean (the default). Generated text and diagram labels change; supplied
+evidence, paths, data and scope/plan hashes do not. Stdout records `report_language`.
+The report path stays `report.html`; an existing report is never overwritten.
+
 Use native bash timeout >= 600000 ms for practice; budget longer for large production data.
 OpenCode asks once for this bundled operation. The command validates the scope hash, creates
 a new plan, checks every source file, copies, verifies and creates `report.html` beside the plan.
@@ -60,6 +65,11 @@ delete, merge or silently select another output. An occupied successful output a
 
 Report actual counts, scope/plan hashes, validation limits and report path. The report command
 verifies files/metadata before writing. Keep submission_ready=false; no archive upload.
+Successful stdout includes `timings_seconds`: scope_validation, planning, scope_recheck,
+preflight, copy_and_metadata, verification, report_verification_and_rendering and total.
+These are measured inside the tool process; they exclude model generation and permission
+waits. The report phase includes another verification. Do not count it as rendering alone.
+After verified COMPLETE, give the result once and stop; automatic compaction is not a new task.
 This mechanism is not an independently authenticated approval gateway or an OS sandbox.
 An operator with general shell/write access can change code or grants; use external filesystem
 isolation when required. The model's read-only scope permission is a workflow boundary.

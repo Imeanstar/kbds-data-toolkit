@@ -17,6 +17,7 @@ from pathlib import PurePosixPath
 import re
 import stat
 import sys
+import time
 import unicodedata
 import zlib
 
@@ -25,8 +26,9 @@ FILESYSTEM_SUPPORTED = sys.platform.startswith("linux")
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW if FILESYSTEM_SUPPORTED else None
 READ_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK if FILESYSTEM_SUPPORTED else None
 FASTQ = re.compile(r"\.(?:fastq|fq)(?:\.gz)?$", re.I)
-PAIR = re.compile(r"^(.*?)[_-]R([12])(_[0-9]+)?(\.(?:fastq|fq)(?:\.gz)?)$", re.I)
-NUMBERED_PAIR = re.compile(r"^(.*)[_-]([12])(_[0-9]+)?(\.(?:fastq|fq)(?:\.gz)?)$", re.I)
+PAIR = re.compile(r"^(.+?)[._-]R([12])(_[0-9]+)?(\.(?:fastq|fq)(?:\.gz)?)$", re.I)
+NUMBERED_PAIR = re.compile(r"^(.+)[._-]([12])(_[0-9]+)?(\.(?:fastq|fq)(?:\.gz)?)$", re.I)
+NUCLEOTIDES = re.compile(rb"[ACGTURYSWKMBDHVNacgturyswkmbdhvn]+")
 REPOSITORIES = {"KRA", "KEA", "GEO", "KVar", "KNA", "review"}
 MAX_LINE = 16 * 1024 * 1024
 
@@ -53,9 +55,39 @@ def parts(relative):
     require(isinstance(relative, str) and relative and not relative.startswith("/"),
             "Expected a nonempty relative path")
     result = relative.split("/")
-    require(all(p not in ("", ".", "..") and not any(ord(c) < 32 or ord(c) == 127 for c in p)
+    require(all(p not in ("", ".", "..") and not any(ord(c) < 32 or ord(c) == 127 or
+                unicodedata.category(c) == "Cs" for c in p)
                 for p in result), "Unsafe path component")
     return result
+
+
+def portable_parts(relative):
+    """Reject ambiguous export names; never silently rename the user's files."""
+    components = parts(relative)
+    for component in components:
+        require(not any(c in '<>:"\\|?*' for c in component) and not component.endswith((" ", ".")),
+                "Nonportable destination component: " + component)
+        stem = component.split(".", 1)[0].rstrip(" ").upper()
+        require(stem not in {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} and
+                re.fullmatch(r"(?:COM|LPT)[1-9\u00b9\u00b2\u00b3]", stem) is None,
+                "Reserved destination device name: " + component)
+        require(len(component.encode("utf-8")) <= 255,
+                "Destination component exceeds 255 UTF-8 bytes: " + component)
+    return components
+
+
+def validate_output_paths(paths):
+    nodes = {}
+    for path in paths:
+        components = portable_parts(path)
+        for index in range(1, len(components) + 1):
+            actual = "/".join(components[:index])
+            key = unicodedata.normalize("NFC", actual).casefold()
+            is_file = index == len(components)
+            previous = nodes.get(key)
+            require(previous is None or (not is_file and previous == (actual, False)),
+                    "Destination collision or directory alias: " + actual)
+            nodes[key] = (actual, is_file)
 
 
 def absolute(value):
@@ -213,7 +245,7 @@ def classify(path):
         return "raw_fastq_candidate", "KRA"
     if low.endswith((".vcf", ".vcf.gz", ".bcf")):
         return "variant_candidate", "KVar"
-    if low.endswith((".fasta", ".fa", ".fna", ".fasta.gz", ".fa.gz")):
+    if low.endswith((".fasta", ".fa", ".fna", ".fasta.gz", ".fa.gz", ".fna.gz")):
         return "sequence_candidate", "KNA"
     if low.endswith((".bam", ".cram", ".sam")):
         return "alignment_requires_review", "review"
@@ -337,16 +369,14 @@ def target_path(row, policy=None):
 
 
 def validate_rows(rows, mode, policy=None):
-    seen, pairs, experiments, sources, runs = set(), {}, {}, set(), {}
+    validate_output_paths(row["destination_relative"] for row in rows)
+    pairs, experiments, sources, runs = {}, {}, set(), {}
     for row in rows:
         require(row["source_relative"] not in sources, "A source is included more than once")
         sources.add(row["source_relative"])
         target = row["destination_relative"]
         require(target == target_path(row, policy), "Destination must follow the approved naming scheme")
         parts(target)
-        normalized = unicodedata.normalize("NFC", target).casefold()
-        require(normalized not in seen, "Destination collision: " + target)
-        seen.add(normalized)
         if mode == "practice":
             require(row["size"] == 0, "Practice copy permits empty placeholders only")
         else:
@@ -375,6 +405,12 @@ def validate_rows(rows, mode, policy=None):
     for key, group in pairs.items():
         require(set(group) == {"1", "2"}, "Missing included mate: " + key)
         a, b = group["1"], group["2"]
+        templates = []
+        for row in (a, b):
+            name = PurePosixPath(row["source_relative"]).name
+            match = pair_match(name)
+            templates.append((name[:match.start(2)] + "{mate}" + name[match.end(2):]).casefold())
+        require(templates[0] == templates[1], "Inconsistent mate filename conventions: " + key)
         require(all(a[k] == b[k] for k in ("repository", "study", "sample", "experiment", "run", "layout")),
                 "Mates assigned to different experiments/runs")
         if policy and policy.get("layout_version", 1) == 2:
@@ -396,11 +432,16 @@ def json_bytes(data):
     return (json.dumps(data, ensure_ascii=True, indent=2) + "\n").encode()
 
 
-def tsv_bytes(rows, columns):
+def tsv_bytes(rows, columns, spreadsheet_safe=False):
     stream = io.StringIO(newline="")
     writer = csv.DictWriter(stream, columns, delimiter="\t", extrasaction="ignore", lineterminator="\n")
     writer.writeheader()
-    writer.writerows(rows)
+    for row in rows:
+        if spreadsheet_safe:
+            row = {key: "'" + value if isinstance(value, str) and
+                   value.lstrip().startswith(("=", "+", "-", "@")) else value
+                   for key, value in row.items()}
+        writer.writerow(row)
     return stream.getvalue().encode()
 
 
@@ -555,7 +596,7 @@ def make_plan(policy, decisions, name, scope_sha256=None):
         errors.append(str(exc))
     if os.path.lexists(policy["destination_root"]):
         errors.append("Destination already exists; select a NEW destination, never merge or overwrite")
-    plan = {"version": VERSION, "policy": policy, "inventory": records, "files": rows,
+    plan = {"version": VERSION, "report_format_version": 2, "policy": policy, "inventory": records, "files": rows,
             "excluded": excluded, "unresolved": unresolved, "errors": errors,
             "status": "READY_FOR_APPROVAL" if not unresolved and not errors and rows else "WAITING_FOR_USER",
             "submission_ready": False, "content_validation": "not_yet_run"}
@@ -580,6 +621,10 @@ def make_plan(policy, decisions, name, scope_sha256=None):
 
 def report_bytes(plan):
     """The same approved-plan serialization is used for writing and verification."""
+    format_version = plan.get("report_format_version", 1)
+    require(type(format_version) is int and format_version in (1, 2), "Unsupported report_format_version")
+    def tsv(rows, columns):
+        return tsv_bytes(rows, columns, spreadsheet_safe=format_version == 2)
     inventory_columns = ["source_relative", "size", "sha256", "kind", "repository_candidate"]
     mapping_columns = ["source_relative", "destination_relative", "repository", "study", "sample", "experiment", "run", "layout", "reason", "evidence"]
     sample_columns = ["study", "sample", "experiment"]
@@ -592,12 +637,12 @@ def report_bytes(plan):
                       for r in plan["files"] if r["repository"] == "KRA"})
     return {
         "plan.json": json_bytes(plan),
-        "inventory.tsv": tsv_bytes(plan["inventory"], inventory_columns),
-        "file_mapping.tsv": tsv_bytes(plan["files"], mapping_columns),
-        "sample_mapping.tsv": tsv_bytes([dict(zip(sample_columns, s)) for s in samples], sample_columns),
-        "unresolved.tsv": tsv_bytes(plan["unresolved"] +
+        "inventory.tsv": tsv(plan["inventory"], inventory_columns),
+        "file_mapping.tsv": tsv(plan["files"], mapping_columns),
+        "sample_mapping.tsv": tsv([dict(zip(sample_columns, s)) for s in samples], sample_columns),
+        "unresolved.tsv": tsv(plan["unresolved"] +
             [{"source_relative": "", "reason": e} for e in plan["errors"]], ["source_relative", "reason"]),
-        "excluded.tsv": tsv_bytes(plan["excluded"], ["source_relative", "reason"]),
+        "excluded.tsv": tsv(plan["excluded"], ["source_relative", "reason"]),
     }
 
 
@@ -670,6 +715,8 @@ def plan_summary(plan):
 
 def check_plan(policy, plan):
     validate_layout_policy(policy)
+    require(type(plan.get("report_format_version", 1)) is int and
+            plan.get("report_format_version", 1) in (1, 2), "Unsupported report_format_version")
     require(plan.get("plan_sha256") == digest({k: v for k, v in plan.items() if k != "plan_sha256"}), "Plan hash mismatch")
     require(plan["version"] == VERSION and plan["policy"] == policy, "Policy/plan changed; rebuild and reapprove")
     require(plan["status"] == "READY_FOR_APPROVAL" and not plan["unresolved"] and not plan["errors"],
@@ -708,10 +755,18 @@ def fastq_ids(root, row):
                 require(max(map(len, (header, seq, plus, quality))) <= MAX_LINE, "FASTQ line exceeds 16 MiB safety limit")
                 require(header.startswith(b"@") and plus.startswith(b"+") and quality,
                         "Invalid four-line FASTQ: " + rel)
+                title = header[1:].rstrip(b"\r\n")
+                require(re.search(rb"[\x00-\x08\x0a-\x1f\x7f]", title) is None,
+                        "FASTQ header contains an ASCII control character other than tab: " + rel)
                 seq, quality = seq.rstrip(b"\r\n"), quality.rstrip(b"\r\n")
                 require(seq and len(seq) == len(quality), "Sequence/quality length mismatch: " + rel)
+                require(NUCLEOTIDES.fullmatch(seq) is not None,
+                        "Unsupported nucleotide in FASTQ; expected IUPAC base letters: " + rel)
                 require(all(33 <= b <= 126 for b in quality), "Invalid quality character: " + rel)
-                tokens = header[1:].split()
+                repeated_title = plus[1:].rstrip(b"\r\n")
+                require(not repeated_title or repeated_title == title,
+                        "FASTQ repeated + title differs from read header: " + rel)
+                tokens = title.split()
                 require(tokens, "Missing read ID: " + rel)
                 ident, mate = tokens[0], None
                 if ident.endswith((b"/1", b"/2")):
@@ -789,9 +844,11 @@ def verify(policy, plan, require_complete=True):
 
 
 def apply(policy, plan, approval):
+    started = time.perf_counter()
     check_plan(policy, plan)
     require(approval == plan["plan_sha256"], "Exact plan hash approval is required")
     preflight(policy, plan)
+    preflight_finished = time.perf_counter()
     path = PurePosixPath(policy["destination_root"])
     with directory(str(path.parent)) as parent:
         os.mkdir(path.name, 0o700, dir_fd=parent)
@@ -822,12 +879,18 @@ def apply(policy, plan, approval):
                     # Keep full events in the package; bound terminal output for small model contexts.
                     if index == 1 or index == len(plan["files"]) or index % max(1, (len(plan["files"]) + 19) // 20) == 0:
                         event("COPIED", index=index, total=len(plan["files"]))
+                copy_finished = time.perf_counter()
                 verify(policy, plan, require_complete=False)
                 write_new(dest, "metadata/COMPLETE.json", json_bytes(completion_record(plan)))
         event("COMPLETE", destination=str(path), submission_ready=False)
     except BaseException:
         event("FAILED_PARTIAL_DESTINATION_PRESERVED", destination=str(path))
         raise
+    finished = time.perf_counter()
+    return {"preflight": preflight_finished - started,
+            "copy_and_metadata": copy_finished - preflight_finished,
+            "verification": finished - copy_finished,
+            "total": finished - started}
 
 
 def main(argv=None):

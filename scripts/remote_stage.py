@@ -2,13 +2,16 @@
 """Run the KBDS toolkit through direct SSH or a user-authenticated local bridge."""
 import argparse
 import base64
+from contextlib import ExitStack
 import json
+import math
 import os
 from pathlib import Path
 import re
 import secrets
 import shlex
 import shutil
+import stat
 import subprocess
 import sys
 import time
@@ -158,11 +161,54 @@ def atomic_json(path, data):
     os.replace(temporary, path)
 
 
+def redirected(path):
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return False
+    return (stat.S_ISLNK(info.st_mode) or
+            bool(getattr(info, "st_file_attributes", 0) & 0x400))  # Windows reparse point, including junctions.
+
+
 def state_root(value):
-    path = Path(value).expanduser().resolve()
-    if path.exists() and path.is_symlink():
-        raise ValueError("Bridge state directory must not be a symlink")
-    return path
+    path = Path(value).expanduser().absolute()
+    if ".." in path.parts:
+        raise ValueError("Bridge state path must not contain parent traversal")
+    for component in (path, *path.parents):
+        if redirected(component):
+            raise ValueError("Bridge state path must not contain symlinks or junctions")
+    return path.resolve()
+
+
+def cleanup_state(root, identity):
+    """Remove only this bridge's recognized files; retain unexpected contents."""
+    if state_root(root) != root:
+        raise ValueError("Bridge state path changed; retained for inspection")
+    current = root.stat()
+    if (current.st_dev, current.st_ino) != identity:
+        raise ValueError("Bridge state directory changed; retained for inspection")
+    files, directories = [], []
+    for entry in root.iterdir():
+        if redirected(entry):
+            raise ValueError("Linked bridge contents; retained for inspection")
+        mode = entry.lstat().st_mode
+        if entry.name == "state.json" and stat.S_ISREG(mode):
+            files.append(entry)
+        elif entry.name in ("requests", "responses") and stat.S_ISDIR(mode):
+            suffix = "request" if entry.name == "requests" else "response"
+            for child in entry.iterdir():
+                if (redirected(child) or not stat.S_ISREG(child.lstat().st_mode)
+                        or not re.fullmatch(r"[0-9a-f]{32}\." + suffix + r"\.json", child.name)):
+                    raise ValueError("Unexpected bridge contents; retained for inspection")
+                files.append(child)
+            directories.append(entry)
+        else:
+            raise ValueError("Unexpected bridge contents; retained for inspection")
+    for path in files:
+        path.unlink()
+    for path in directories:
+        path.rmdir()
+    root.rmdir()
 
 
 def load_state(root):
@@ -259,7 +305,9 @@ def run_bridge(args):
     root = state_root(args.bridge_state)
     if root.exists():
         raise ValueError(f"Bridge state already exists: {root}")
-    root.mkdir(parents=True)
+    root.mkdir(mode=0o700, parents=True)
+    created = root.stat()
+    identity = (created.st_dev, created.st_ino)
     requests = root / "requests"
     responses = root / "responses"
     requests.mkdir()
@@ -303,11 +351,21 @@ def run_bridge(args):
             deadline = time.monotonic() + 5
             while close_response.exists() and time.monotonic() < deadline:
                 time.sleep(0.05)
-        shutil.rmtree(root, ignore_errors=True)
+        try:
+            cleanup_state(root, identity)
+        except (OSError, ValueError) as exc:
+            print(f"Bridge cleanup stopped: {exc}", file=sys.stderr)
     return 0
 
 
 def submit(root, operation, command=None, timeout=86400, output=None):
+    with ExitStack() as stack:
+        stream = (stack.enter_context(Path(output).expanduser().open("x", encoding="utf-8", newline="\n"))
+                  if output else None)
+        return submit_request(root, operation, command, timeout, stream)
+
+
+def submit_request(root, operation, command, timeout, output):
     state = load_state(root)
     request_id = uuid.uuid4().hex
     request = {"version": 1, "token": state["token"], "operation": operation}
@@ -327,12 +385,8 @@ def submit(root, operation, command=None, timeout=86400, output=None):
     response_path.unlink()
     stdout = response.get("stdout", "")
     if output:
-        path = Path(output).expanduser()
-        if path.exists() or path.is_symlink() or not path.parent.resolve().is_dir():
-            raise ValueError("Local output must be a new file under an existing directory")
-        with path.open("x", encoding="utf-8", newline="\n") as stream:
-            stream.write(stdout)
-        print(f"LOCAL_OUTPUT\t{path.resolve()}")
+        output.write(stdout)
+        print(f"LOCAL_OUTPUT\t{Path(output.name).resolve()}")
     else:
         sys.stdout.write(stdout)
     sys.stderr.write(response.get("stderr", ""))
@@ -361,6 +415,8 @@ def main(argv=None):
     parser.add_argument("--approve-plan")
     args = parser.parse_args(argv)
     try:
+        if not math.isfinite(args.bridge_timeout) or args.bridge_timeout <= 0:
+            raise ValueError("Bridge timeout must be a finite positive number of seconds")
         root = state_root(args.bridge_state)
         if args.action == "bridge-open":
             if not args.host or not args.user:
@@ -374,7 +430,15 @@ def main(argv=None):
                           output=args.output)
         if not args.host:
             raise ValueError("No active bridge; direct SSH requires --host")
-        return subprocess.call(build_command(args))
+        direct = build_command(args)
+        if args.output:
+            path = Path(args.output).expanduser()
+            # Exclusive creation happens before any remote mutation can start.
+            with path.open("xb") as stream:
+                result = subprocess.call(direct, stdout=stream)
+            print(f"LOCAL_OUTPUT\t{path.resolve()}")
+            return result
+        return subprocess.call(direct)
     except (OSError, ValueError, RuntimeError, json.JSONDecodeError, TimeoutError) as exc:
         print("BLOCKED: " + str(exc), file=sys.stderr)
         return 2

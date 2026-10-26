@@ -3,6 +3,9 @@
 Use the full repository's local `scripts/remote_stage.py` bridge. Collect the endpoint and
 exact source/destination/workspace from the user or existing approved private policy.
 Keep the toolkit and policy/decision JSON local; do not install tools, register keys or store passwords.
+This bridge is for an explicitly authorized off-host workflow. Server-local Qwen does not need
+it. Use a trusted local account and a fresh private state path, with no symlink/junction components.
+The bridge is not an independently authenticated remote-approval service.
 
 1. Ask the user to run from the local repository root with an available Python executable:
    `python scripts/remote_stage.py --host HOST --user USER --port PORT bridge-open`.
@@ -23,6 +26,12 @@ Keep the toolkit and policy/decision JSON local; do not install tools, register 
    If the bridge repeatedly fails, use the read-only TSV fallback below instead of endless retries.
 5. After task completion or terminal failure run `python scripts/remote_stage.py bridge-close`.
    Never bypass SSH host-key checks, use sudo or invoke a generic remote shell.
+
+`--output` reserves a new local output file before sending the SSH/bridge request. Existing
+output blocks the request. Retain partial output after failure; do not delete and retry blindly.
+Timeout values must be finite and positive. Cleanup removes only recognized bridge files that
+still match the opened state. If unexpected/replaced files exist, preserve the state directory
+for operator review and use a new private state path. Never recursively remove an uncertain path.
 
 ## TSV fallback
 

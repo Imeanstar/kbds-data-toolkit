@@ -55,4 +55,4 @@ validity or submission readiness. Exit 130 means interruption.
 For a standalone skill in another agent, the same engine is `scripts/toolkit.py` in this
 skill folder; `self_check.py` and `build_html_report.py --plan ...` are its helpers. OpenCode's
 bundled profile uses the repository wrapper above. For an explicitly authorized off-host job,
-read [ssh-workflow.md](references/ssh-workflow.md); the OpenCode profile does not permit that bridge.
+read [ssh-workflow.md](ssh-workflow.md); the OpenCode profile does not permit that bridge.

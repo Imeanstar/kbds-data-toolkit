@@ -8,6 +8,9 @@ description: Inspect sequencing data with a local tool-enabled agent. Default to
 Use the selected local model with native tools. The bundled OpenCode profile uses only local
 Qwen; a text-only model cannot inspect files. On the data host, use `scripts/kbds.py` from the
 repository root. No SSH bridge, package installation, external model or subagent is needed.
+The bundled runtime guard requires OpenCode without `--pure` / `OPENCODE_PURE=true`.
+A plugin path in configuration does not prove its hooks are active. See the repository README
+for the local read-metadata check; do not claim a guard was tested from configuration alone.
 
 ## Read only what this step needs
 
@@ -30,6 +33,9 @@ or implementation code. Do not load both execution workflows below.
   limits. Practice accepts only empty included placeholders, never nonzero records.
 - Do not read credentials or unrelated roots. Keep actual paths, identifiers, policies, logs
   and reports out of public Git. Always report `submission_ready=false`; never upload.
+- Preserve Unicode names and distinct lanes/chunks. Do not flatten, combine mates or rewrite
+  incompatible names. Pair parsing is evidence to check against approved relationships.
+  Unsupported formats and path conflicts require a scoped decision, not a format conversion.
 
 ## Default: kbds-review
 
@@ -67,6 +73,11 @@ Timeout or failed verification is not completion. Preserve partial output and st
 Continue after actual answers/approvals. For reports, the bundled report command verifies
 before writing new `report.html`; never overwrite or claim browser/print QA without performing it.
 Report actual counts, hashes, limitations and full report paths.
+When a bundled run returns verified `COMPLETE` with a report path, give one final summary and
+stop. A compaction summary or automatic continuation is not a new user task. Do not reload
+references or repeat verification after that terminal result unless the user requests it.
+Separate engine stage durations from model generation, approval waits and total elapsed time;
+never infer exact phase durations from file timestamps alone.
 
 For standalone use, the same engine/helpers are in this skill's `scripts/` folder. For an
 explicitly authorized off-host task, read [ssh-workflow.md](references/ssh-workflow.md).

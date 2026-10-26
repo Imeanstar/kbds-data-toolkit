@@ -19,7 +19,7 @@ def candidate(path):
         return "raw_fastq_candidate", "KRA"
     if low.endswith((".vcf", ".vcf.gz", ".bcf")):
         return "variant_candidate", "KVar"
-    if low.endswith((".fasta", ".fa", ".fna", ".fasta.gz", ".fa.gz")):
+    if low.endswith((".fasta", ".fa", ".fna", ".fasta.gz", ".fa.gz", ".fna.gz")):
         return "sequence_candidate", "KNA"
     if low.endswith((".bam", ".cram", ".sam")):
         return "alignment_requires_review", "review"

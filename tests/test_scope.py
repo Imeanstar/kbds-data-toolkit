@@ -28,6 +28,12 @@ def rule():
 
 
 class PathRuleTests(unittest.TestCase):
+    def test_invalid_report_language_stops_before_scope_or_inventory(self):
+        with mock.patch.object(scope_runner, "load_scope") as load:
+            with self.assertRaisesRegex(t.Blocked, "language"):
+                scope_runner.run("/unused/scope.json", "unused", "unused", language="invalid")
+            load.assert_not_called()
+
     def test_numeric_sample_suffix_does_not_become_the_mate(self):
         for stem in ("Sample_1", "Sample_2", "Sample-1"):
             keys = [t.pair_key(f"batch/{stem}_{mate}.fastq.gz") for mate in (1, 2)]
@@ -142,7 +148,14 @@ class ScopeRunTests(unittest.TestCase):
         result, code = scope_runner.run(str(self.scope_path), approval, "auto-001")
         self.assertEqual(code, 0)
         self.assertEqual(result["status"], "COMPLETE")
+        self.assertEqual(result["report_language"], "ko")
         self.assertEqual(result["included_files"], 4)
+        timings = result["timings_seconds"]
+        self.assertEqual(set(timings), {"scope_validation", "planning", "scope_recheck", "preflight",
+                                      "copy_and_metadata", "verification", "report_verification_and_rendering", "total"})
+        self.assertTrue(all(value >= 0 for value in timings.values()))
+        self.assertGreaterEqual(timings["total"], sum(value for key, value in timings.items() if key != "total"))
+        self.assertIn("excludes model inference", result["timing_scope"])
         self.assertFalse(result["submission_ready"])
         self.assertTrue(Path(result["report_path"]).is_file())
         self.assertIn(approval, Path(result["report_path"]).read_text())
@@ -214,10 +227,14 @@ class ScopeRunTests(unittest.TestCase):
         self.assertEqual(inspected.returncode, 0, inspected.stderr)
         self.assertEqual(json.loads(inspected.stdout)["scope_sha256"], t.digest(self.scope))
         self.assertFalse(self.destination.exists())
-        executed = subprocess.run(command + ["--approve-scope", t.digest(self.scope), "--name", "cli-run"],
+        executed = subprocess.run(command + ["--approve-scope", t.digest(self.scope), "--name", "cli-run", "--language", "en"],
                                   capture_output=True, text=True)
         self.assertEqual(executed.returncode, 0, executed.stderr)
-        self.assertEqual(json.loads(executed.stdout)["status"], "COMPLETE")
+        result = json.loads(executed.stdout)
+        self.assertEqual(result["status"], "COMPLETE")
+        self.assertEqual(result["report_language"], "en")
+        self.assertIn('<html lang="en">', Path(result["report_path"]).read_text())
+        self.assertEqual(json.loads(Path(result["plan_path"]).read_text())["approval_scope_sha256"], t.digest(self.scope))
 
     def test_report_failure_is_not_success_and_preserves_verified_copy(self):
         with mock.patch.object(scope_runner, "build_verified_report", side_effect=ValueError("report failed")):
