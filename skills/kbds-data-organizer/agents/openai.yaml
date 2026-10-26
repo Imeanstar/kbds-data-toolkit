@@ -1,0 +1,4 @@
+interface:
+  display_name: "KBDS Data Organizer"
+  short_description: "Inventory, stage, verify, and report research data"
+  default_prompt: "Use $kbds-data-organizer to review my selected dataset in read-only mode; stage and create an HTML report only when I explicitly request it."
