@@ -151,10 +151,10 @@ test("successful scoped run closes tools and adds authoritative completion check
   const { hooks } = await fixture(t)
   await hooks["tool.execute.after"]({ tool: "bash", sessionID: "one", callID: "run", args: { command: run } }, result())
   await assert.rejects(hooks["tool.execute.before"]({ tool: "skill", sessionID: "one" }, { args: { name: "kbds-data-organizer" } }), /KBDS_TASK_COMPLETE/)
-  const output = { system: [] }
-  await hooks["experimental.chat.system.transform"]({ sessionID: "one" }, output)
-  assert.match(output.system[0], /VERIFIED_REPORT_COMPLETE/)
-  assert.match(output.system[0], /report.html/)
+  const output = { context: [] }
+  await hooks["experimental.session.compacting"]({ sessionID: "one" }, output)
+  assert.match(output.context[0], /VERIFIED_REPORT_COMPLETE/)
+  assert.match(output.context[0], /report.html/)
 })
 
 test("checkpoint preserves all instructions in one system message for local chat templates", async t => {
@@ -163,8 +163,8 @@ test("checkpoint preserves all instructions in one system message for local chat
     const output = { system: [...base] }
     await hooks["experimental.chat.system.transform"]({ sessionID: "one" }, output)
     assert.equal(output.system.length, 1)
-    assert.ok(output.system[0].startsWith(base.length ? base.join("\n\n") + "\n\n" : "KBDS runtime checkpoint"))
-    assert.match(output.system[0], /KBDS runtime checkpoint/)
+    assert.ok(output.system[0].startsWith(base.length ? base.join("\n\n") + "\n\n" : "KBDS runtime rules"))
+    assert.match(output.system[0], /KBDS runtime rules/)
   }
 })
 
@@ -184,10 +184,40 @@ test("checkpoints keep allowed control paths under the project despite a stale w
       policy: path.join(root, "config/policy.local.json"),
       decisions: path.join(root, "config/decisions.local.json"),
     })
-    assert.equal(state.status, "ACTIVE")
+    assert.equal(state.status, text === compaction.context[0] ? "ACTIVE" : undefined)
     assert.match(state.next_action, /No new approval is granted/)
     assert.equal("scope" in state.control_paths, false)
   }
+})
+
+test("system prefix stays byte-identical through reads and completion while compaction tracks both", async t => {
+  const { hooks, ref } = await fixture(t)
+  const system = async () => {
+    const output = { system: ["base instructions", "agent instructions"] }
+    await hooks["experimental.chat.system.transform"]({ sessionID: "one" }, output)
+    assert.equal(output.system.length, 1)
+    return Buffer.from(output.system[0], "utf8")
+  }
+  const checkpoint = async () => {
+    const output = { context: [] }
+    await hooks["experimental.session.compacting"]({ sessionID: "one" }, output)
+    return JSON.parse(output.context[0].slice(output.context[0].indexOf("{")))
+  }
+  const initial = await system()
+  assert.deepEqual((await checkpoint()).references_read, [])
+  await read(hooks, ref)
+  assert.deepEqual(await system(), initial)
+  const active = await checkpoint()
+  assert.equal(active.status, "ACTIVE")
+  assert.deepEqual(active.references_read, ["skills/kbds-data-organizer/references/safety-policy.md:1-2"])
+  await hooks["tool.execute.after"]({ tool: "bash", sessionID: "one", callID: "run", args: { command: run } }, result())
+  assert.deepEqual(await system(), initial)
+  const completed = await checkpoint()
+  assert.equal(completed.status, "VERIFIED_REPORT_COMPLETE")
+  assert.equal(completed.report_path, complete.report_path)
+  assert.deepEqual(completed.references_read, active.references_read)
+  assert.match(completed.next_action, /final chat answer and stop/)
+  await assert.rejects(read(hooks, ref), /KBDS_TASK_COMPLETE/)
 })
 
 test("completion is not inferred from prose, failed commands, partial output or arbitrary shell", async t => {

@@ -109,8 +109,11 @@ history, and stops tool use after a verified bundled run/report. New genuine use
 start a new turn; synthetic compaction continuations do not. Updated references, unread
 ranges and mutable control/data files remain readable. A summary may still run after the
 final answer, but it cannot restart the completed task through the guarded continuation hook.
-The checkpoint includes the canonical project root and fixed absolute policy/decisions paths;
-these prevent path reconstruction errors and do not grant or change scope approval.
+Stable system instructions include the canonical project root, fixed absolute policy/decisions
+paths and general reuse/stop rules. Changing job status and read history enter the checkpoint
+only during compaction, so ordinary reference reads do not rewrite the initial system prefix.
+This avoids a known cause of local prompt-cache invalidation; the speed change has not been
+re-measured. Tool gates still use current session state. No scope approval is granted or changed.
 The guard also raises recognized `apply`/`run` timeouts to at least 600000 ms. It does not
 grant permissions, authenticate approvals, or provide an OS sandbox. Other OpenCode versions
 need explicit hook compatibility tests before use. See the
@@ -271,7 +274,7 @@ research server or model. Local model acceptance tests are separate from CI evid
 The session-guard behavior tests use Node.js 22 without third-party packages.
 
 The recorded review run discovered 118 Python tests: Linux passed 117 and skipped one;
-Windows passed 54 and skipped 64 Linux-only tests. All 18 session-guard tests passed.
+Windows passed 54 and skipped 64 Linux-only tests. All 19 session-guard tests passed.
 These results cover synthetic checks, not completion of a private model-driven data job.
 
 - `AGENTS.md`: data-agent rules. Repository maintenance is a separate task.

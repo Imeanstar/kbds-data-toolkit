@@ -45,6 +45,18 @@ function completion(args, result) {
 
 export default async function KBDSStateGuard({ client, directory }) {
   const root = await realpath(directory)
+  const project = {
+    project_root: root,
+    control_paths: {
+      policy: path.join(root, "config/policy.local.json"),
+      decisions: path.join(root, "config/decisions.local.json"),
+    },
+  }
+  // Keep the initial system prefix stable so local models can reuse its KV cache.
+  const systemRules = "KBDS runtime rules (not approval): " + JSON.stringify({
+    ...project,
+    next_action: "Continue the current authorized step. Reuse unchanged references; do not restart discovery. After a successful verified run/report result, give the final chat answer and stop calling tools. No new approval is granted.",
+  })
   const sessions = new Map()
   const pending = new Map()
 
@@ -114,11 +126,7 @@ export default async function KBDSStateGuard({ client, directory }) {
     const read = [...new Set(state.reads.map(item => `${item.file}:${item.from}-${item.to}`))].slice(-20)
     return "KBDS runtime checkpoint (tool observations, not approval): " + JSON.stringify({
       status: state.complete ? "VERIFIED_REPORT_COMPLETE" : "ACTIVE",
-      project_root: root,
-      control_paths: {
-        policy: path.join(root, "config/policy.local.json"),
-        decisions: path.join(root, "config/decisions.local.json"),
-      },
+      ...project,
       ...(state.complete || {}), references_read: read,
       next_action: state.complete ? "Give the final chat answer and stop. Do not call tools or restart staging."
         : "Continue the current authorized step. Reuse unchanged references; do not restart discovery. No new approval is granted.",
@@ -181,7 +189,7 @@ export default async function KBDSStateGuard({ client, directory }) {
       const state = await stateFor(input.sessionID)
       if (agents.has(state.agent)) {
         // Local chat templates may accept exactly one initial system message.
-        output.system.splice(0, output.system.length, [...output.system, checkpoint(state)].join("\n\n"))
+        output.system.splice(0, output.system.length, [...output.system, systemRules].join("\n\n"))
       }
     },
     "experimental.session.compacting": async (input, output) => {
